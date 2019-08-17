@@ -15,6 +15,7 @@ import time
 import subprocess
 import traceback
 import platform
+import socket
 
 __VERSION__ = 0.1
 
@@ -65,7 +66,7 @@ class Utils(object):
     @staticmethod
     def run_command(command, args, stdout=None, stderr=None, background=False, check_func=None):
         Utils.logger.debug('Run command {} args {}'.format(command, args))
-        p = subprocess.Popen(args, stdout=stdout, stderr=stderr)
+        p = subprocess.Popen(args, stdout=stdout, stderr=stderr, stdin=(open('/dev/null', 'r')))
         if not background:
             p.wait()
             return p.returncode
@@ -85,6 +86,24 @@ class Utils(object):
             return int(lines[0].rstrip())
         else:
             return None
+
+    @staticmethod
+    def is_port_open(ports):
+        if type(ports) is not list:
+            ports = [ports]
+
+        for port in ports:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:  # TCP
+                try:
+                    result = sock.connect_ex(('127.0.0.1', int(port)))
+                    if result != 0:
+                        raise Exception("Port {} is closed".format(port))
+                    else:
+                        Utils.logger.debug("Port {} is open".format(port))
+                except Exception as e:
+                    Utils.logger.debug(e)
+                    return False
+        return True
 
     @staticmethod
     def is_pid_alive(pid):
@@ -127,13 +146,19 @@ class Utils(object):
         return None
 
     @staticmethod
-    def check_log_output(file, regex, timeout=5):
+    def check_log_output(file, regex=None, linecount=None, timeout=5):
         time_used = 0
         outputs = ''
         with open(file, 'r') as fh:
             while True:
                 outputs += fh.read()
-                if outputs and re.search(regex, outputs):
+                check_res = False
+                if (outputs and regex):
+                    check_res = re.search(regex, outputs)
+                elif (outputs and linecount):
+                    if len(outputs.rstrip().split("\n")) == linecount:
+                        check_res = True
+                if check_res:
                     Utils.logger.debug('program output: {}'.format(outputs))
                     return True
                 if (time_used < timeout):
@@ -202,6 +227,12 @@ class Iptable(object):
                 '-m', 'set', '--match-set', rule.name, 'dst',
                 '-j', 'REDIRECT', '--to-ports', rule.socks_local_port
             ])
+            self.start_commands.append([
+                self.command, '-t', 'nat', '-A', self.chain_name,
+                '-p', 'udp',
+                '-m', 'set', '--match-set', rule.name, 'dst',
+                '-j', 'REDIRECT', '--to-ports', rule.socks_local_port
+            ])
 
     def start(self):
         self.logger.debug('start iptables')
@@ -254,10 +285,10 @@ class V2ray(object):
             inbounds = json.loads(inbounds)
 
         self.config = {
-            'log': {},
+            'log': {"loglevel": "none"},
             'inbounds': self._get_v2ray_inbounds(dns_local_port, dns, inbounds or []),
             'outbounds': self.outbounds,
-            'routing': self._get_v2ray_routing()
+            'routing': self._get_v2ray_routing(inbounds)
         }
 
         return err
@@ -266,7 +297,10 @@ class V2ray(object):
         tags = {}
         err = []
         for outbound in self.outbounds:
-            tags[outbound['tag']] = 1
+            if outbound.get('tag'):
+                tags[outbound['tag']] = 1
+            else:
+                err.append('Outbound must set a tag.')
 
         for rule in self.rules:
             if not tags.get(rule.name):
@@ -287,7 +321,7 @@ class V2ray(object):
 
         def check_func(p):
             if Utils.check_log_output(self.log_file,
-                                      regex=r'v2ray.com/core:\s+V2Ray[0-9. ]+started',
+                                      linecount=2,
                                       timeout=5):
                 return p.pid
             return None
@@ -367,7 +401,16 @@ class V2ray(object):
 
         return inbounds
 
-    def _get_v2ray_routing(self):
+    def keep_alive(self):
+        ports = []
+        for out in self.config['inbounds']:
+            ports.append(out['port'])
+
+        if not Utils.is_port_open(ports):
+            self.stop()
+            self.start()
+
+    def _get_v2ray_routing(self, ext_inbounds):
         routings = []
 
         routing_template = {
@@ -382,6 +425,9 @@ class V2ray(object):
             routings.append(routing)
 
         routings[-1]['inboundTag'].append('dns')  # dns proxy use gfwlist rule
+        for inbound in ext_inbounds:
+            routings[-1]['inboundTag'].append(inbound['tag'])
+
         return {'rules': routings}
 
 
@@ -515,6 +561,11 @@ class Dnsmasq(object):
         else:
             self.logger.debug('stop faild')
 
+    def keep_alive(self):
+        if not Utils.is_port_open(self.port):
+            self.stop()
+            self.start()
+
     def status(self):
         if Utils.is_pid_alive_from_file(self.pid_file):
             self.logger.info('dnsmasq is running')
@@ -583,6 +634,10 @@ class GFW(object):
             raise Exception("\n".join(self.config_err))
 
         self.logger.info('ok')
+
+    def keep_alive(self):
+        self.dnsmasq.keep_alive()
+        self.v2ray.keep_alive()
 
     def _process_gfw_list(self, content):
         ret = set()
@@ -667,7 +722,8 @@ def main():
         'status': 'Show running status',
         'update_list': 'Update lists to the latested version',
         'check': 'Check running dependence',
-        'init': 'Check and init'
+        'init': 'Check and init',
+        'keep_alive': 'Keep v2ray and dnsmasq are alive'
     }
 
     parser = argparse.ArgumentParser(
@@ -717,6 +773,10 @@ def main():
         elif opts.command == 'init':
             gfw.check()
             gfw.prepare()
+        elif opts.command == 'keep_alive':
+            gfw.check()
+            gfw.keep_alive()
+
     except Exception as e:
         Utils.logger.debug(traceback.format_exc())
         Utils.logger.info('Exception: {}'.format(e))
