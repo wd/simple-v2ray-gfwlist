@@ -867,7 +867,7 @@ def main():
 
     parser = argparse.ArgumentParser(
         formatter_class=argparse.RawTextHelpFormatter,
-        description='Simple V2ray wrapper to get across the GFW',
+        description='Simple V2ray wrapper to get across the GFW, version {}'.format(__VERSION__),
         usage="%(prog)s [--debug] {}".format('|'.join(commands.keys()))
     )
 

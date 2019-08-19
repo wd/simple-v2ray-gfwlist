@@ -60,7 +60,7 @@ opkg/entware 配置好之后，执行下面的命令安装依赖:
 opkg install python3, python3-logging, python3-urllib, python3-openssl, python3-codecs, ca-bundle
 #+END_SRC
 
-如果是在路由器上面运行，可能还需要配置一下虚拟内存，因为 v2ray 是 go 写的，对内存要求比较高，需要你插入一个 u 盘，如果是 merlin 系统，上面配置 opkg/entware 的时候应该就已经插入了，那么就会有一个 /opt/ 目录。
+如果是在路由器上面运行，可能还需要配置一下虚拟内存，因为 v2ray 是 go 写的，对内存要求比较高，需要你插入一个 u 盘，如果是 merlin 系统，上面配置 opkg/entware 的时候应该就已经插入了，那么就会有一个 =/opt= 目录。
 
 其他的可以参考[[https://gist.github.com/wd/e0bc83b33ce63506a9bdbc3b81658c52#gistcomment-2347495][这个链接]] FAQ 的 8。
 
@@ -79,13 +79,14 @@ fi
 #+END_SRC
 
 * Autostart
-
-想要每次路由器启动都自动运行，需要在 =/jffs/scripts/wan-start= 里面增加下面的信息， =/opt/svgfw/= 是程序所在目录。
+对于梅林系统，想要每次路由器启动都自动运行，需要在 =/jffs/scripts/wan-start= 里面增加下面的信息， =/opt/svgfw/= 是程序所在目录。
 
 #+BEGIN_SRC 
 cru a svgfw_check "*/5 * * * * /opt/svgfw/svgfw keep_alive"
 sleep 20 && /opt/svgfw/svgfw start
 #+END_SRC
+
+我没有其他系统了，欢迎补充。
 
 * Todo
 - 支持 ipv6
