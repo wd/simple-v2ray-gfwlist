@@ -859,7 +859,6 @@ def main():
         'restart': 'Restart proxy',
         'status': 'Show running status',
         'update_list': 'Update lists to the latested version',
-        'init': 'Check and init',
         'keep_alive': 'Keep v2ray and dnsmasq are alive',
         'update_v2ray': 'Update v2ray binary',
         'install_v2ray': 'Install v2ray binary',
@@ -912,9 +911,6 @@ def main():
         elif opts.command == 'status':
             gfw.check()
             gfw.status()
-        elif opts.command == 'init':
-            gfw.check()
-            gfw.prepare()
         elif opts.command == 'keep_alive':
             gfw.check()
             gfw.keep_alive()

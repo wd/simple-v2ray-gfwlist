@@ -1,12 +1,91 @@
-* Things todo
+* Intro
+
+简单讲，这是一个用来方便使用 v2ray 代理上网的工具。支持下面的特性：
+1. 只依赖了 python3 内置的模块（openwrt 上面的即使内置模块也被拆分成了不同的包）。
+2. 尽量少的修改 iptables 规则。
+3. 通过域名名单来使用不同的代理，比如 gfwlist 可以使用美国代理，而 netflix 单独使用一个支持访问的香港代理。
+4. 可以自动更新域名列表。
+5. 会自动处理大部分的 v2ray 配置。
+6. 支持不走代理的黑名单 ip。
+7. 可以自动更新 v2ray 程序。
+8. 支持运行检查，方便在路由器上面跑，v2ray 在路由器上面因为内存问题有时候会奔溃。
+
+这个程序的主要功能是在路由器上面跑透明代理，这样局域网内所有终端都可以无缝翻墙，比如电视盒子，Google Home 这样的设备。
+
+* Usage
+
+#+BEGIN_SRC 
+$ .//svgfw -h
+usage: svgfw [--debug] start|stop|restart|status|update_list|init|keep_alive|update_v2ray|install_v2ray|check
+
+Simple V2ray wrapper to get across the GFW
+
+positional arguments:
+  {start,stop,restart,status,update_list,init,keep_alive,update_v2ray,install_v2ray,check}
+                        start          : Start proxy
+                        stop           : Stop proxy and clean all rules
+                        restart        : Restart proxy
+                        status         : Show running status
+                        update_list    : Update lists to the latested version
+                        keep_alive     : Keep v2ray and dnsmasq are alive
+                        update_v2ray   : Update v2ray binary
+                        install_v2ray  : Install v2ray binary
+                        check          : Check if the envirments are ok
+
+optional arguments:
+  -h, --help            show this help message and exit
+  --debug, -d           Show debug messages
+  --full-log, -l        Add logging to v2ray, dnsmasq for debug
+#+END_SRC
+
+- =start=, =stop=, =restart=: 启动，停止，重启代理
+- =status=: 打印运行状态
+- =update_list=: 更新规则列表
+- =keep_alive=: 检查运行状态，如果有奔溃的程序，自动启动那个程序
+- =update_v2ray=, =install_v2ray=: 更新，安装 v2ray，安装会在程序所在的目录里面建一个 =./bin/= 目录
+- =check=: 检查运行环境
+
+上面的命令配合使用 =-d= 参数会输出更多的信息，debug 的时候可以使用。
+  
+* Dependency
+
+如果是在路由器上面执行，那需要先配置好 opkg/entware，配置方法依据路由器不同而不同：
+- Asuswrt Merlin: https://github.com/RMerl/asuswrt-merlin/wiki/Entware
+- openwrt: 我记得应该默认就是配置好的。
+- Linux: Linux 一般不需要做什么配置了，只需要看看 =python3= 是不是存在就可以。
+
+opkg/entware 配置好之后，执行下面的命令安装依赖:
+#+BEGIN_SRC 
+opkg install python3, python3-logging, python3-urllib, python3-openssl, python3-codecs, ca-bundle
+#+END_SRC
+
+如果是在路由器上面运行，可能还需要配置一下虚拟内存，因为 v2ray 是 go 写的，对内存要求比较高，需要你插入一个 u 盘，如果是 merlin 系统，上面配置 opkg/entware 的时候应该就已经插入了，那么就会有一个 /opt/ 目录。
+
+其他的可以参考[[https://gist.github.com/wd/e0bc83b33ce63506a9bdbc3b81658c52#gistcomment-2347495][这个链接]] FAQ 的 8。
+
+我的是 merlin 系统，使用的是 =entware-setup.sh= 完成的 entware 安装，修改之后我的 =/jffs/scripts/post-mount= 文件内容如下:
+#+BEGIN_SRC sh
+!/bin/sh
+
+if [ -d "$1/entware" ] ; then
+  ln -nsf $1/entware /tmp/opt
+  if [ -f /opt/swap ];then
+    dd if=/dev/zero of=/opt/swap bs=1M count=500
+    mkswap /opt/swap
+  fi
+  swapon /opt/swap
+fi
+#+END_SRC
+
+* Autostart
+
+想要每次路由器启动都自动运行，需要在 =/jffs/scripts/wan-start= 里面增加下面的信息， =/opt/svgfw/= 是程序所在目录。
+
+#+BEGIN_SRC 
+cru a svgfw_check "*/5 * * * * /opt/svgfw/svgfw keep_alive"
+sleep 20 && /opt/svgfw/svgfw start
+#+END_SRC
+
+* Todo
 - 支持 ipv6
 - 线路切换
-
-* Done
-- 支持按照源地址和目的地址设置 ip 白名单
-- 不同的域名可以走不同的 proxy，方便区分 netflix 流量
-- 支持更新 gfwlist 等设置了地址的规则列表
-- 支持运行检查，方便在路由器上面跑，v2ray 在路由器上面因为内存问题有时候会奔溃
-
-* Dependency
-- opkg install python3, python3-logging, python3-urllib, python3-openssl, python3-codecs, ca-bundle
