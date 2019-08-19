@@ -13,6 +13,10 @@
 
 这个程序的主要功能是在路由器上面跑透明代理，这样局域网内所有终端都可以无缝翻墙，比如电视盒子，Google Home 这样的设备。
 
+* Install
+
+打开[[https://github.com/wd/simple-v2ray-gfwlist/releases/latest][下载页面]]下载最新的 =svgfw-xx.zip= ，解压到一个一个目录，然后根据 =config_sample.ini= 配置一个 =config.ini= 出来。之后可以执行一下 =./svgfw -d check/= 看看有没有错误信息。
+
 * Usage
 
 #+BEGIN_SRC 
