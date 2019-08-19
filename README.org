@@ -9,13 +9,14 @@
 6. 支持不走代理的黑名单 ip。
 7. 可以自动更新 v2ray 程序。
 8. 支持运行检查，方便在路由器上面跑，v2ray 在路由器上面因为内存问题有时候会奔溃。
+9. 完全开源，你有需要可以自己修改，也可以提交合并。
 
 这个程序的主要功能是在路由器上面跑透明代理，这样局域网内所有终端都可以无缝翻墙，比如电视盒子，Google Home 这样的设备。
 
 * Usage
 
 #+BEGIN_SRC 
-$ .//svgfw -h
+$ ./svgfw -h
 usage: svgfw [--debug] start|stop|restart|status|update_list|init|keep_alive|update_v2ray|install_v2ray|check
 
 Simple V2ray wrapper to get across the GFW
@@ -88,4 +89,7 @@ sleep 20 && /opt/svgfw/svgfw start
 
 * Todo
 - 支持 ipv6
-- 线路切换
+- 线路检查切换等功能
+
+* Thanks
+- [[https://github.com/zfl9/ss-tproxy][ss-tproxy]]: 在自己写这个项目之前使用的是这个方案，我这个方案也参考了一些思路，这个方案支持更加广泛，比如 chnroute 之类的方式。
