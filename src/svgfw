@@ -139,7 +139,10 @@ class Utils(object):
         raise Exception('File {} not found.'.format(fname))
 
     @staticmethod
-    def which(program):
+    def which(program, path_list=None):
+        if not path_list:
+            path_list = []
+
         def is_exe(fpath):
             return os.path.isfile(fpath) and os.access(fpath, os.X_OK)
 
@@ -148,7 +151,7 @@ class Utils(object):
             if is_exe(program):
                 return program
         else:
-            for path in os.environ["PATH"].split(os.pathsep):
+            for path in [*os.environ["PATH"].split(os.pathsep), *path_list]:
                 exe_file = os.path.join(path, program)
                 if is_exe(exe_file):
                     return exe_file
@@ -198,9 +201,14 @@ class Iptable(object):
             [self.command, '-t', 'nat', '-N', self.chain_name],
         ]
 
-        for ip in conf['main']['ip_black_lists']:
+        for ip in conf['main']['ip_black_lists_src']:
             self.start_commands.append([
                 self.command, '-t', 'nat', '-A', self.chain_name, '-s', ip, '-j', 'ACCEPT'
+            ])
+
+        for ip in conf['main']['ip_black_lists_dst']:
+            self.start_commands.append([
+                self.command, '-t', 'nat', '-A', self.chain_name, '-d', ip, '-j', 'ACCEPT'
             ])
 
         self.start_commands.extend([
@@ -272,7 +280,7 @@ class V2ray(object):
         dns = conf['main']['dns']
         dns_local_port = conf['main']['dns_local_port']
         command = conf['v2ray']['v2ray']
-        self.command = Utils.which(command)
+        self.command = Utils.which(command, ['/opt/v2ray', '/usr/local/bin', '/usr/bin/v2ray'])
         if not self.command:
             raise Exception('Command {} not found.'.format(command))
 
@@ -618,7 +626,8 @@ class GFW(object):
         conf = self._ini_to_python(config)
 
         main_section = conf['main']
-        main_section['ip_black_lists'] = Utils.str_to_list(main_section['ip_black_lists'])
+        main_section['ip_black_lists_src'] = Utils.str_to_list(main_section['ip_black_lists_src'])
+        main_section['ip_black_lists_dst'] = Utils.str_to_list(main_section['ip_black_lists_dst'])
         run_dir = Utils.find_file(main_section['run_dir'])
 
         if not os.path.exists(run_dir):

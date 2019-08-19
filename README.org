@@ -1,14 +1,13 @@
 * Things todo
 - 支持 ipv6
-- 运行检查和自动重启
 - 线路切换
-- 默认的读取目录可能工作不正常
 - install/update v2ray  https://api.github.com/repos/v2ray/v2ray-core/releases/latest
 
 * Done
-- 可以设置局域网内，有的 ip 不走任何列表：黑名单
+- 支持按照源地址和目的地址设置 ip 白名单
 - 不同的域名可以走不同的 proxy，方便区分 netflix 流量
-- 更新 gfwlist
+- 支持更新 gfwlist 等设置了地址的规则列表
+- 支持运行检查，方便在路由器上面跑，v2ray 在路由器上面因为内存问题有时候会奔溃
 
 * Dependency
 - opkg install python3, python3-logging, python3-urllib, python3-openssl, python3-codecs, ca-bundle
