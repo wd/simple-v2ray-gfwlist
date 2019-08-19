@@ -17,7 +17,7 @@ import traceback
 import platform
 import socket
 
-__VERSION__ = 0.1
+__VERSION__ = '0.1'
 
 default_logging_level = logging.INFO
 
@@ -127,6 +127,16 @@ class Utils(object):
         if Utils.is_pid_alive(pid):
             os.kill(pid, 9)
         return True
+
+    @staticmethod
+    def find_file(fname):
+        my_path = os.path.dirname(os.path.abspath(__file__))
+        fname_with_path = '{}/{}'.format(my_path, fname)
+        if os.path.exists(fname):
+            return fname
+        elif os.path.exists(fname_with_path):
+            return fname_with_path
+        raise Exception('File {} not found.'.format(fname))
 
     @staticmethod
     def which(program):
@@ -266,7 +276,7 @@ class V2ray(object):
         if not self.command:
             raise Exception('Command {} not found.'.format(command))
 
-        run_dir = conf['main']['run_dir']
+        run_dir = Utils.find_file(conf['main']['run_dir'])
 
         self.config_file = "{}/v2ray_config.json".format(run_dir)
         self.pid_file = "{}/v2ray.pid".format(run_dir)
@@ -460,11 +470,11 @@ class Dnsmasq(object):
     def init(self, conf):
         err = self._init_rules(conf)
 
-        run_dir = conf['main']['run_dir']
+        run_dir = Utils.find_file(conf['main']['run_dir'])
 
         self.config_file = '{}/dnsmasq.conf'.format(run_dir)
-        self.pid_file = os.path.realpath('{}/dnsmasq.pid'.format(run_dir))
-        self.log_file = os.path.realpath('{}/dnsmasq.log'.format(run_dir))
+        self.pid_file = '{}/dnsmasq.pid'.format(run_dir)
+        self.log_file = '{}/dnsmasq.log'.format(run_dir)
 
         command = conf['dnsmasq']['dnsmasq']
         self.port = conf['dnsmasq']['port']
@@ -494,7 +504,7 @@ class Dnsmasq(object):
 
     def _init_rules(self, conf):
         err = []
-        lists_dir = conf['main']['lists_dir']
+        lists_dir = Utils.find_file(conf['main']['lists_dir'])
 
         def sort_func(name):
             if name == 'list_gfwlist':
@@ -604,12 +614,12 @@ class GFW(object):
 
     def init(self):
         config = configparser.ConfigParser()
-        config.read(CONFIG)
+        config.read(Utils.find_file(CONFIG))
         conf = self._ini_to_python(config)
 
         main_section = conf['main']
         main_section['ip_black_lists'] = Utils.str_to_list(main_section['ip_black_lists'])
-        run_dir = main_section['run_dir']
+        run_dir = Utils.find_file(main_section['run_dir'])
 
         if not os.path.exists(run_dir):
             os.mkdir(run_dir)
