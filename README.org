@@ -1,7 +1,6 @@
 * Things todo
 - 支持 ipv6
 - 线路切换
-- install/update v2ray  https://api.github.com/repos/v2ray/v2ray-core/releases/latest
 
 * Done
 - 支持按照源地址和目的地址设置 ip 白名单
