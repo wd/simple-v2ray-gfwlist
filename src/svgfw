@@ -218,12 +218,12 @@ class Iptable(object):
             [self.command, '-t', 'nat', '-N', self.chain_name],
         ]
 
-        for ip in conf['main']['ip_black_lists_src']:
+        for ip in conf['main']['ip_blacklists_src']:
             self.start_commands.append([
                 self.command, '-t', 'nat', '-A', self.chain_name, '-s', ip, '-j', 'ACCEPT'
             ])
 
-        for ip in conf['main']['ip_black_lists_dst']:
+        for ip in conf['main']['ip_blacklists_dst']:
             self.start_commands.append([
                 self.command, '-t', 'nat', '-A', self.chain_name, '-d', ip, '-j', 'ACCEPT'
             ])
@@ -739,8 +739,8 @@ class GFW(object):
         conf = self._ini_to_python(config)
 
         main_section = conf['main']
-        main_section['ip_black_lists_src'] = Utils.str_to_list(main_section['ip_black_lists_src'])
-        main_section['ip_black_lists_dst'] = Utils.str_to_list(main_section['ip_black_lists_dst'])
+        main_section['ip_blacklists_src'] = Utils.str_to_list(main_section['ip_blacklists_src'])
+        main_section['ip_blacklists_dst'] = Utils.str_to_list(main_section['ip_blacklists_dst'])
         run_dir = Utils.find_file(main_section['run_dir'])
 
         if not os.path.exists(run_dir):
