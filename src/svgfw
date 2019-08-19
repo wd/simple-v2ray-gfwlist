@@ -16,11 +16,14 @@ import subprocess
 import traceback
 import platform
 import socket
+import tempfile
+import zipfile
 
 __VERSION__ = '0.1'
 
 default_logging_level = logging.INFO
-
+LATEST_V2RAY_TAG_URL = 'https://api.github.com/repos/v2ray/v2ray-core/releases/latest'
+V2RAY_DOWNLOAD_LINK = "https://github.com/v2ray/v2ray-core/releases/download/v{version}/v2ray-{arch}.zip"
 CONFIG = 'config.ini'
 
 
@@ -36,6 +39,18 @@ class Logger():
 
 class Utils(object):
     logger = Logger('Utils').logger
+
+    @staticmethod
+    def get_command_version(args, regex):
+        p = subprocess.run(args, capture_output=True)
+        if p.returncode:
+            raise Exception('Command {} run faild: {}'.format(args, p.stderr))
+        if p.stdout:
+            match_str = p.stdout.decode('utf-8')
+            m = re.search(regex, match_str)
+            if m:
+                return [int(v) for v in m.groups()]
+        raise Exception('No version found for command {}'.format(args))
 
     @staticmethod
     def str_to_list(ips):
@@ -284,6 +299,11 @@ class V2ray(object):
         if not self.command:
             raise Exception('Command {} not found.'.format(command))
 
+        self.version = Utils.get_command_version([self.command, '--version'],
+                                                 r'V2Ray (\d)\.(\d+)\.(\d+)')
+
+        self.logger.debug('V2ray version {}'.format(self.version))
+
         run_dir = Utils.find_file(conf['main']['run_dir'])
 
         self.config_file = "{}/v2ray_config.json".format(run_dir)
@@ -447,6 +467,66 @@ class V2ray(object):
             routings[-1]['inboundTag'].append(inbound['tag'])
 
         return {'rules': routings}
+
+    def _update(self, version, files_to_update):
+        uname = platform.uname()
+        arch = ''
+        if uname.system == 'Darwin':
+            arch = 'macos'
+        elif uname.system == 'Linux':
+            if uname.machine == 'aarch64':
+                arch = 'linux-arm64'
+        if not arch:
+            self.logger.info('this system not support update: {}'.format(uname))
+            return
+
+        link = V2RAY_DOWNLOAD_LINK.format(version='.'.join([str(v) for v in version]), arch=arch)
+        resp = request.urlopen(link)
+        if resp.status != 200:
+            raise Exception('download zip file faild.')
+
+        tmpfile = tempfile.NamedTemporaryFile(delete=True)
+        self.logger.debug('tempfile is {}'.format(tmpfile.name))
+        tmpfile.write(resp.read())
+        with zipfile.ZipFile(tmpfile) as zip:
+            path = os.path.dirname(self.command)
+            with tempfile.TemporaryDirectory() as tmppath:
+                self.logger.debug('extract files {} to {}'.format(files_to_update, tmppath))
+                zip.extractall(members=files_to_update, path=tmppath)
+                for fname in files_to_update:
+                    fsrc = '{}/{}'.format(tmppath, fname)
+                    fdst = '{}/{}'.format(path, fname)
+                    self.logger.debug('cp {}'.format(fdst))
+                    os.system('cp -p {} {}'.format(fsrc, fdst))
+                    if fname in ['v2ray', 'v2ctl']:
+                        os.chmod(fdst, 755)
+                    else:
+                        os.chmod(fdst, 644)
+
+    def update_binary(self):
+        self.logger.debug('update v2ray binary')
+        files_to_update = ['v2ctl', 'v2ray', 'v2ctl.sig', 'v2ray.sig', 'geoip.dat', 'geosite.dat']
+
+        for f in files_to_update:
+            fpath = '{}/{}'.format(os.path.dirname(self.command), f)
+            if not os.access(fpath, os.W_OK):
+                raise Exception("file {} can't be write".format(fpath))
+
+        resp = request.urlopen(LATEST_V2RAY_TAG_URL)
+        if resp.status == 200:
+            tag_info = json.load(resp)
+            m = re.search(r'(\d)\.(\d+)\.(\d+)', tag_info.get('name', ''))
+            if m:
+                remote_version = [int(v) for v in m.groups()]
+                self.logger.info('Local version: {}, remote version: {}'.format(self.version, remote_version))
+                if (self.version < remote_version):
+                    self.logger.info('do update')
+                    self._update(remote_version, files_to_update)
+                    self.logger.info('update finished')
+                else:
+                    self.logger.info('do not need to update')
+            else:
+                self.logger.info('faild to get remote version')
 
 
 class Dnsmasq(object):
@@ -710,6 +790,9 @@ class GFW(object):
                 url = self.config['main']['gfwlist']
                 self._update_gfw_list(url, rule.filename)
 
+    def update_v2ray(self):
+        self.v2ray.update_binary()
+
     def status(self):
         self.v2ray.status()
         self.dnsmasq.status()
@@ -740,9 +823,9 @@ def main():
         'restart': 'Restart proxy',
         'status': 'Show running status',
         'update_list': 'Update lists to the latested version',
-        'check': 'Check running dependence',
         'init': 'Check and init',
-        'keep_alive': 'Keep v2ray and dnsmasq are alive'
+        'keep_alive': 'Keep v2ray and dnsmasq are alive',
+        'update_v2ray': 'Update v2ray binary'
     }
 
     parser = argparse.ArgumentParser(
@@ -772,9 +855,8 @@ def main():
     Utils.logger.debug('version {} run on {}/{}/{}'.format(__VERSION__, uname.system, uname.release, uname.machine))
     try:
         gfw = GFW()
-        if opts.command == 'check':
-            gfw.check()
-        elif opts.command == 'update_list':
+        gfw.check()
+        if opts.command == 'update_list':
             gfw.update_list()
         elif opts.command == 'start':
             gfw.check()
@@ -783,7 +865,7 @@ def main():
             gfw.stop()
         elif opts.command == 'restart':
             gfw.stop()
-            time.sleep(2)
+            time.sleep(1)
             gfw.check()
             gfw.start()
         elif opts.command == 'status':
@@ -795,6 +877,8 @@ def main():
         elif opts.command == 'keep_alive':
             gfw.check()
             gfw.keep_alive()
+        elif opts.command == 'update_v2ray':
+            gfw.update_v2ray()
 
     except Exception as e:
         Utils.logger.debug(traceback.format_exc())
