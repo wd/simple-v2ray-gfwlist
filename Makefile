@@ -4,10 +4,10 @@ Release_tag := 0.1
 Package_name := 'svgfw-$(Release_tag).zip'
 
 test:
-	env PYTHONPATH=./src pytest
+	pytest -v
 
 update:
-	cd src && ./svgfw.py update_list --debug
+	./src/svgfw.py update_list -d
 
 package:
 	$(eval TMP := $(shell mktemp -d))

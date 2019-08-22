@@ -62,14 +62,14 @@ class Utils(object):
 
     @staticmethod
     def split_ip_port(ip, default_port):
-        ip = ip.split(':')
-        if len(ip) > 1:
-            ip = ip[0]
-            port = ip[1]
+        ip_pair = ip.split(':')
+        if len(ip_pair) > 1:
+            ip = ip_pair[0]
+            port = ip_pair[1]
         else:
-            ip = ip[0]
+            ip = ip_pair[0]
             port = default_port
-        return ip, port
+        return ip, int(port)
 
     @staticmethod
     def read_file_to_list(filename):
