@@ -625,8 +625,9 @@ class Dnsmasq(object):
 
         run_dir = Utils.find_file(conf['main']['run_dir'])
 
+        # pid_file 地址必须是绝对路径
         self.config_file = '{}/dnsmasq.conf'.format(run_dir)
-        self.pid_file = '{}/dnsmasq.pid'.format(run_dir)
+        self.pid_file = os.path.abspath('{}/dnsmasq.pid'.format(run_dir))
         self.log_file = '{}/dnsmasq.log'.format(run_dir)
 
         command = conf['dnsmasq']['dnsmasq']
