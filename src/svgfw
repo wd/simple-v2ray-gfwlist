@@ -81,7 +81,7 @@ class Utils(object):
     @staticmethod
     def run_command(command, args, stdout=None, stderr=None, background=False, check_func=None):
         Utils.logger.debug('Run command {} args {}'.format(command, args))
-        p = subprocess.Popen(args, stdout=stdout, stderr=stderr, stdin=(open('/dev/null', 'r')))
+        p = subprocess.Popen(args, stdout=stdout, stderr=stderr, stdin=None)
         if not background:
             p.wait()
             return p.returncode
@@ -280,8 +280,39 @@ class Iptable(object):
         for args in self.stop_commands:
             Utils.run_command(self.command, args)
 
+    def _is_alive(self):
+        args = [self.command, '-t', 'nat', '-nL', self.chain_name]
+        chain_name_pos = 4  # 这个位置是规则名称
+        should_count_rule_command_length = 5  # 长度大于 5 的是具体规则
+        total_rule_count = 0
+        for command in self.start_commands:
+            if ((re.search('iptables', command[0]))
+                    and (command[chain_name_pos] == self.chain_name)
+                    and (len(command) > should_count_rule_command_length)):
+                total_rule_count += 1
+
+        with tempfile.NamedTemporaryFile(delete=True) as fh:
+            code = Utils.run_command(self.command, args, stdout=fh)
+            if code:
+                raise Exception("iptables command run faild")
+            fh.seek(0)
+            rule_count = len(fh.readlines())
+
+            if total_rule_count + 2 == rule_count:
+                return True
+        return False
+
     def status(self):
-        self.logger.info('iptable is running')
+        if self._is_alive():
+            self.logger.info('iptable is running')
+        else:
+            self.logger.info('iptables is dead')
+
+    def keep_alive(self):
+        if not self._is_alive():
+            self.logger.info('dead, do restart')
+            self.stop()
+            self.start()
 
 
 class V2ray(object):
@@ -458,6 +489,7 @@ class V2ray(object):
             ports.append(out['port'])
 
         if not Utils.is_port_open(ports):
+            self.logger.info('dead, do restart')
             self.stop()
             self.start()
 
@@ -694,6 +726,7 @@ class Dnsmasq(object):
 
     def keep_alive(self):
         if not Utils.is_port_open(self.port):
+            self.logger.info('dead, do restart')
             self.stop()
             self.start()
 
@@ -770,6 +803,7 @@ class GFW(object):
     def keep_alive(self):
         self.dnsmasq.keep_alive()
         self.v2ray.keep_alive()
+        self.iptable.keep_alive()
 
     def _process_gfw_list(self, content):
         ret = set()
