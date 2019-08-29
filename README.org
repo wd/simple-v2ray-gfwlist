@@ -102,10 +102,10 @@ Swap:       511996          0     511996
 #+end_src
 
 * Autostart
-对于梅林系统，想要每次路由器启动都自动运行，需要在 =/jffs/scripts/wan-start= 里面增加下面的信息， =/opt/svgfw/= 是程序所在目录。这样可以每分钟检查一下是不是在运行，如果不在运行了会自动启动。
+对于梅林系统，想要每次路由器启动都自动运行，需要在 =/jffs/scripts/wan-start= 里面增加下面的信息， =/opt/svgfw/= 是程序所在目录。这样可以每分钟检查一下是不是在运行，如果不在运行了会自动启动。可以观察 =/tmp/svgfw.log= 文件看是不是有奔溃，如果奔溃比较多，最好还是升级路由器吧，要翻墙会很不稳定。
 
 #+BEGIN_SRC 
-cru a svgfw_check "* * * * * /opt/svgfw/svgfw keep_alive"
+cru a svgfw_check "* * * * * /opt/svgfw/svgfw keep_alive >> /tmp/svgfw.log"
 #+END_SRC
 
 我没有其他系统了，欢迎补充。
