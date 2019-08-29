@@ -19,7 +19,7 @@ import socket
 import tempfile
 import zipfile
 
-__VERSION__ = '0.2'
+__VERSION__ = '0.3'
 
 default_logging_level = logging.INFO
 LATEST_V2RAY_TAG_URL = 'https://api.github.com/repos/v2ray/v2ray-core/releases/latest'

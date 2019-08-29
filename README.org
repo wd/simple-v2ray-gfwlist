@@ -73,12 +73,15 @@ opkg install python3, python3-logging, python3-urllib, python3-openssl, python3-
 
 其他的可以参考[[https://gist.github.com/wd/e0bc83b33ce63506a9bdbc3b81658c52#gistcomment-2347495][这个链接]] FAQ 的 8。
 
-我的是 merlin 系统，使用的是 =entware-setup.sh= 完成的 entware 安装，修改之后我的 =/jffs/scripts/post-mount= 文件内容如下:
+我的是 merlin 系统，使用的是 =entware-setup.sh= 完成的 entware 安装，修改之后我的 =/jffs/scripts/post-mount= 文件内容如下，会建立一个 500M 的虚拟内存:
 #+BEGIN_SRC sh
 !/bin/sh
 
 if [ -d "$1/entware" ] ; then
   ln -nsf $1/entware /tmp/opt
+fi
+
+if [ -d "/opt" ];then
   if [ -f /opt/swap ];then
     dd if=/dev/zero of=/opt/swap bs=1M count=500
     mkswap /opt/swap
@@ -87,12 +90,22 @@ if [ -d "$1/entware" ] ; then
 fi
 #+END_SRC
 
+建议时常观察一下这块内存的使用情况，一般是不会用到的，如果真的被用到了，那你的系统会比较慢，或者你的翻墙速度会比较慢。
+
+使用下面的命令可以观察，看那个 Swap 那行，第二个数字，应该是 0。
+#+begin_src sh
+# free -m
+             total       used       free     shared    buffers     cached
+Mem:        440420     324796     115624       2552       6224     108704
+-/+ buffers/cache:     209868     230552
+Swap:       511996          0     511996
+#+end_src
+
 * Autostart
-对于梅林系统，想要每次路由器启动都自动运行，需要在 =/jffs/scripts/wan-start= 里面增加下面的信息， =/opt/svgfw/= 是程序所在目录。
+对于梅林系统，想要每次路由器启动都自动运行，需要在 =/jffs/scripts/wan-start= 里面增加下面的信息， =/opt/svgfw/= 是程序所在目录。这样可以每分钟检查一下是不是在运行，如果不在运行了会自动启动。
 
 #+BEGIN_SRC 
-cru a svgfw_check "*/5 * * * * /opt/svgfw/svgfw keep_alive"
-sleep 20 && /opt/svgfw/svgfw start
+cru a svgfw_check "* * * * * /opt/svgfw/svgfw keep_alive"
 #+END_SRC
 
 我没有其他系统了，欢迎补充。
