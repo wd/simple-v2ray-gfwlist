@@ -294,7 +294,8 @@ class Iptable(object):
         with tempfile.NamedTemporaryFile(delete=True) as fh:
             code = Utils.run_command(self.command, args, stdout=fh)
             if code:
-                raise Exception("iptables command run faild")
+                self.logger.warning("iptables command run faild, assume the command itself is ok")
+                return False
             fh.seek(0)
             rule_count = len(fh.readlines())
 
@@ -313,6 +314,8 @@ class Iptable(object):
             self.logger.info('dead, do restart')
             self.stop()
             self.start()
+        else:
+            self.logger.info('alive')
 
 
 class V2ray(object):
@@ -492,6 +495,8 @@ class V2ray(object):
             self.logger.info('dead, do restart')
             self.stop()
             self.start()
+        else:
+            self.logger.info('alive')
 
     def _get_v2ray_routing(self, ext_inbounds):
         routings = []
@@ -730,6 +735,8 @@ class Dnsmasq(object):
             self.logger.info('dead, do restart')
             self.stop()
             self.start()
+        else:
+            self.logger.info('alive')
 
     def status(self):
         if Utils.is_pid_alive_from_file(self.pid_file):
