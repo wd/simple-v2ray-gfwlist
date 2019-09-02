@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+
+if [ "$1" == "error_quit" ];then
+    exit 9
+fi

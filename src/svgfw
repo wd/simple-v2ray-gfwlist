@@ -27,6 +27,10 @@ V2RAY_DOWNLOAD_LINK = "https://github.com/v2ray/v2ray-core/releases/download/v{v
 CONFIG = 'config.ini'
 
 
+class GFWException(Exception):
+    pass
+
+
 class Logger():
     def __init__(self, name):
         logformat = '%(asctime)s %(name)s: %(levelname)s [%(funcName)s/%(lineno)d] %(message)s'
@@ -44,13 +48,13 @@ class Utils(object):
     def get_command_version(args, regex):
         p = subprocess.run(args, capture_output=True)
         if p.returncode:
-            raise Exception('Command {} run faild: {}'.format(args, p.stderr))
+            raise GFWException('Command {} run faild: {}'.format(args, p.stderr))
         if p.stdout:
             match_str = p.stdout.decode('utf-8')
             m = re.search(regex, match_str)
             if m:
                 return [int(v) for v in m.groups()]
-        raise Exception('No version found for command {}'.format(args))
+        raise GFWException('No version found for command {}'.format(args))
 
     @staticmethod
     def str_to_list(ips):
@@ -112,10 +116,10 @@ class Utils(object):
                 try:
                     result = sock.connect_ex(('127.0.0.1', int(port)))
                     if result != 0:
-                        raise Exception("Port {} is closed".format(port))
+                        raise GFWException("Port {} is closed".format(port))
                     else:
                         Utils.logger.debug("Port {} is open".format(port))
-                except Exception as e:
+                except GFWException as e:
                     Utils.logger.debug(e)
                     return False
         return True
@@ -124,7 +128,7 @@ class Utils(object):
     def is_pid_alive(pid):
         try:
             os.kill(pid, 0)
-        except Exception:
+        except GFWException:
             return False
         return True
 
@@ -151,7 +155,7 @@ class Utils(object):
             return fname
         elif os.path.exists(fname_with_path):
             return fname_with_path
-        raise Exception('File {} not found.'.format(fname))
+        raise GFWException('File {} not found.'.format(fname))
 
     @staticmethod
     def which(program, path_list=None):
@@ -336,7 +340,7 @@ class V2ray(object):
 
         try:
             local_bin_path = [Utils.find_file('./bin')]
-        except Exception:
+        except GFWException:
             local_bin_path = []
 
         self.command = Utils.which(
@@ -398,7 +402,7 @@ class V2ray(object):
         self.logger.debug('check v2ray config file')
         code = Utils.run_command('v2ray', check_args, stdout=open('/dev/null', 'w'))
         if code:
-            raise Exception("v2ray config file check error")
+            raise GFWException("v2ray config file check error")
 
     def _run(self):
         run_args = [self.command, '--config', self.config_file]
@@ -418,7 +422,7 @@ class V2ray(object):
                                 check_func=check_func)
 
         if not Utils.is_pid_alive(pid):
-            raise Exception('start v2ray faild')
+            raise GFWException('start v2ray faild')
 
         self.logger.debug('done, pid {}'.format(pid))
         with open(self.pid_file, 'w') as fh:
@@ -427,7 +431,7 @@ class V2ray(object):
     def start(self):
         self.logger.debug('start v2ray')
         if Utils.is_pid_alive_from_file(self.pid_file):
-            raise Exception("Previouse process is still running")
+            raise GFWException("Previouse process is still running")
 
         with open(self.config_file, 'w') as fh:
             fh.write(json.dumps(self.config, indent=4))
@@ -525,7 +529,7 @@ class V2ray(object):
             fpath = '{}/{}'.format(dstpath, f)
             if not ((not os.path.exists(fpath) and os.access(dstpath, os.W_OK))
                     or os.access(fpath, os.W_OK)):
-                raise Exception("file {} can't be write".format(fpath))
+                raise GFWException("file {} can't be write".format(fpath))
 
         uname = platform.uname()
         arch = ''
@@ -541,7 +545,7 @@ class V2ray(object):
         link = V2RAY_DOWNLOAD_LINK.format(version='.'.join([str(v) for v in version]), arch=arch)
         resp = request.urlopen(link)
         if resp.status != 200:
-            raise Exception('download zip file faild.')
+            raise GFWException('download zip file faild.')
 
         tmpfile = tempfile.NamedTemporaryFile(delete=True)
         self.logger.debug('tempfile is {}'.format(tmpfile.name))
@@ -570,7 +574,7 @@ class V2ray(object):
                 self.logger.debug('remote version is {}'.format(remote_version))
                 return remote_version
 
-        raise Exception('faild to get remote version')
+        raise GFWException('faild to get remote version')
 
     def update_binary(self):
         dstpath = os.path.dirname(self.command)
@@ -588,7 +592,7 @@ class V2ray(object):
     def install_binary(self):
         try:
             local_bin_path = Utils.find_file('./bin')
-        except Exception:
+        except GFWException:
             my_path = os.path.dirname(os.path.abspath(__file__))
             local_bin_path = '{}/{}'.format(my_path, './bin')
             os.mkdir(local_bin_path)
@@ -693,7 +697,7 @@ class Dnsmasq(object):
     def start(self):
         self.logger.debug('start dnsmasq')
         if Utils.is_pid_alive_from_file(self.pid_file):
-            raise Exception("Previouse process is still running")
+            raise GFWException("Previouse process is still running")
 
         with open(self.config_file, 'w') as fh:
             fh.write(self.config)
@@ -716,7 +720,7 @@ class Dnsmasq(object):
 
         pid = Utils.get_pid(self.pid_file)
         if not Utils.is_pid_alive(pid):
-            raise Exception("start dnsmasq faild.")
+            raise GFWException("start dnsmasq faild.")
 
         self.logger.debug('done, pid {}'.format(pid))
         with open(self.pid_file, 'w') as fh:
@@ -746,7 +750,7 @@ class Dnsmasq(object):
 
 
 class GFW(object):
-    def __init__(self):
+    def __init__(self, config=CONFIG):
         self.logger = Logger(self.__class__.__name__).logger
         self.logger.debug('init')
         self.config = None
@@ -756,7 +760,7 @@ class GFW(object):
         self.v2ray = V2ray()
         self.iptable = Iptable()
 
-        self.init()
+        self.init(config)
 
     def _ini_to_python(self, config):
         ret = defaultdict(dict)
@@ -774,9 +778,13 @@ class GFW(object):
                 return fh.write(data)
         return 0
 
-    def init(self):
+    def init(self, config_str):
         config = configparser.ConfigParser()
-        config.read(Utils.find_file(CONFIG))
+        try:
+            config.read(Utils.find_file(config_str))
+        except GFWException:
+            config.read_string(config_str)
+
         conf = self._ini_to_python(config)
 
         main_section = conf['main']
@@ -804,7 +812,7 @@ class GFW(object):
 
     def check(self):
         if self.config_err:
-            raise Exception("\n".join(self.config_err))
+            raise GFWException("\n".join(self.config_err))
 
         self.logger.info('ok')
 
@@ -879,7 +887,7 @@ class GFW(object):
     def confirm_network_available(self):
         resp = request.urlopen('https://www.baidu.com/')
         if resp.status != 200:
-            raise Exception('Network not available')
+            raise GFWException('Network not available')
 
     def start(self):
         self.confirm_network_available()
@@ -962,7 +970,7 @@ def main():
         elif opts.command == 'install_v2ray':
             gfw.install_v2ray()
 
-    except Exception as e:
+    except GFWException as e:
         Utils.logger.debug(traceback.format_exc())
         Utils.logger.info('Exception: {}'.format(e))
 

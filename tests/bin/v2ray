@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+
+if [ "$1" == "--version" ];then
+   echo -e "V2Ray 4.20.0 (V2Fly, a community-driven edition of V2Ray.) Custom\nA unified platform for anti-censorship."
+fi

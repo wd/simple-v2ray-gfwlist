@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+
+if [ "$1" == "error_quit" ];then
+    exit 9
+elif [ "$1" == "output" ];then
+    echo "$2"
+fi
