@@ -119,16 +119,19 @@ class Utils(object):
                         raise GFWException("Port {} is closed".format(port))
                     else:
                         Utils.logger.debug("Port {} is open".format(port))
-                except GFWException as e:
+                except Exception as e:
                     Utils.logger.debug(e)
                     return False
         return True
 
     @staticmethod
     def is_pid_alive(pid):
+        if not pid:
+            return False
+
         try:
             os.kill(pid, 0)
-        except GFWException:
+        except Exception:
             return False
         return True
 
@@ -340,7 +343,7 @@ class V2ray(object):
 
         try:
             local_bin_path = [Utils.find_file('./bin')]
-        except GFWException:
+        except Exception:
             local_bin_path = []
 
         self.command = Utils.which(
@@ -592,7 +595,7 @@ class V2ray(object):
     def install_binary(self):
         try:
             local_bin_path = Utils.find_file('./bin')
-        except GFWException:
+        except Exception:
             my_path = os.path.dirname(os.path.abspath(__file__))
             local_bin_path = '{}/{}'.format(my_path, './bin')
             os.mkdir(local_bin_path)
@@ -782,7 +785,7 @@ class GFW(object):
         config = configparser.ConfigParser()
         try:
             config.read(Utils.find_file(config_str))
-        except GFWException:
+        except Exception:
             config.read_string(config_str)
 
         conf = self._ini_to_python(config)
@@ -970,7 +973,7 @@ def main():
         elif opts.command == 'install_v2ray':
             gfw.install_v2ray()
 
-    except GFWException as e:
+    except Exception as e:
         Utils.logger.debug(traceback.format_exc())
         Utils.logger.info('Exception: {}'.format(e))
 
