@@ -36,9 +36,10 @@ class Logger():
         logformat = '%(asctime)s %(name)s: %(levelname)s [%(funcName)s/%(lineno)d] %(message)s'
         self.logger = logging.getLogger(name)
         self.logger.setLevel(default_logging_level)
-        myhandler = logging.StreamHandler(stream=sys.stdout)
-        myhandler.setFormatter(logging.Formatter(logformat))
-        self.logger.addHandler(myhandler)
+        if not self.logger.handlers:
+            myhandler = logging.StreamHandler(stream=sys.stdout)
+            myhandler.setFormatter(logging.Formatter(logformat))
+            self.logger.addHandler(myhandler)
 
 
 class Utils(object):
