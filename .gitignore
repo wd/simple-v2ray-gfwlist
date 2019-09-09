@@ -2,3 +2,4 @@ src/config.ini
 src/run
 *.zip
 *.md5
+/src/bin
