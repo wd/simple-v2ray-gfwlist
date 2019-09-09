@@ -66,7 +66,7 @@ optional arguments:
 
 opkg/entware 配置好之后，执行下面的命令安装依赖:
 #+BEGIN_SRC 
-opkg install python3, python3-logging, python3-urllib, python3-openssl, python3-codecs, ca-bundle
+opkg install python3 python3-logging python3-urllib python3-openssl python3-codecs ca-bundle
 #+END_SRC
 
 如果是在路由器上面运行，可能还需要配置一下虚拟内存，因为 v2ray 是 go 写的，对内存要求比较高，需要你插入一个 u 盘，如果是 merlin 系统，上面配置 opkg/entware 的时候应该就已经插入了，那么就会有一个 =/opt= 目录。
