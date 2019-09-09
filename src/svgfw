@@ -84,16 +84,14 @@ class Utils(object):
         return lines
 
     @staticmethod
-    def run_command(command, args, stdout=None, stderr=None, background=False, check_func=None):
-        Utils.logger.debug('Run command {} args {}'.format(command, args))
+    def run_command(args, stdout=None, stderr=None, background=False):
+        Utils.logger.debug('Run command {}'.format(args))
         p = subprocess.Popen(args, stdout=stdout, stderr=stderr, stdin=None)
         if not background:
             p.wait()
             return p.returncode
         else:
-            if check_func:
-                return check_func(p)
-            return p.pid
+            return p
 
     @staticmethod
     def get_pid(pid_file):
@@ -181,44 +179,63 @@ class Utils(object):
 
         return None
 
-    @staticmethod
-    def check_log_output(file, regex=None, linecount=None, timeout=5):
-        time_used = 0
-        outputs = ''
-        with open(file, 'r') as fh:
-            while True:
-                outputs += fh.read()
-                check_res = False
-                if (outputs and regex):
-                    check_res = re.search(regex, outputs)
-                elif (outputs and linecount):
-                    if len(outputs.rstrip().split("\n")) == linecount:
-                        check_res = True
-                if check_res:
-                    Utils.logger.debug('program output: {}'.format(outputs))
-                    return True
-                if (time_used < timeout):
-                    Utils.logger.debug('check output {}'.format(time_used))
-                    time.sleep(1)
-                    time_used += 1
-                else:
-                    Utils.logger.debug('program output: {}'.format(outputs))
-                    return False
 
-        return None
+class Prog(object):
+    def __init__(self, command, args, pid_file, bin_path=None):
+        self.logger = Logger(self.__class__.__name__).logger
+
+        self.pid_file = pid_file
+        self.args = args or []
+
+        self.name = command
+        self.command = Utils.which(command, bin_path)
+        if not self.command:
+            raise GFWException('Command {} not found.'.format(command))
+
+    def start(self, ignore_pid_file=False):
+        self._ensure_prog_is_not_running()
+        process = Utils.run_command([self.command, *self.args], background=True)
+        max_time = 2  # 如果 2s 之后程序还在运行，就认为程序执行启动成功
+        try:
+            process.wait(max_time)
+            code = process.poll()
+            if code:
+                raise GFWException('command faild with code: {}'.format(code))
+        except subprocess.TimeoutExpired:
+            pass
+
+        self.logger.debug('done, pid {}'.format(process.pid))
+        if not ignore_pid_file:
+            with open(self.pid_file, 'w') as fh:
+                fh.write(str(process.pid))
+
+    def _ensure_prog_is_not_running(self):
+        if Utils.is_pid_alive_from_file(self.pid_file):
+            raise GFWException("Previouse process is still running")
+        else:
+            self.logger.debug('prog not running')
+
+    def stop(self):
+        if Utils.stop_from_pid_file(self.pid_file):
+            self.logger.debug('done')
+        else:
+            self.logger.debug('stop faild')
+
+    def status(self):
+        if Utils.is_pid_alive_from_file(self.pid_file):
+            self.logger.info('{} is running'.format(self.name))
+        else:
+            self.logger.info('{} is dead'.format(self.name))
 
 
 class Iptable(object):
-    def __init__(self):
+    def __init__(self, run_dir, rules, dnsmasq_port, domestic_dns, ip_blacklists_src, ip_blacklists_dst):
         self.logger = Logger(self.__class__.__name__).logger
-
-    def init(self, conf, dnsmasq):
-        err = []
 
         command = 'iptables'
         self.command = Utils.which(command)
         if not self.command:
-            err.append('Command {} not found.'.format(command))
+            raise GFWException('Command {} not found.'.format(command))
 
         self.chain_name = 'SVGFW'
         self.start_commands = [
@@ -226,24 +243,24 @@ class Iptable(object):
             [self.command, '-t', 'nat', '-N', self.chain_name],
         ]
 
-        for ip in conf['main']['ip_blacklists_src']:
+        for ip in ip_blacklists_src:
             self.start_commands.append([
                 self.command, '-t', 'nat', '-A', self.chain_name, '-s', ip, '-j', 'ACCEPT'
             ])
 
-        for ip in conf['main']['ip_blacklists_dst']:
+        for ip in ip_blacklists_dst:
             self.start_commands.append([
                 self.command, '-t', 'nat', '-A', self.chain_name, '-d', ip, '-j', 'ACCEPT'
             ])
 
         self.start_commands.extend([
             # accept the domestic dns request
-            [self.command, '-t', 'nat', '-A', self.chain_name, '-d', dnsmasq.domestic_server,
+            [self.command, '-t', 'nat', '-A', self.chain_name, '-d', domestic_dns,
              '-p', 'udp', '--dport', '53', '-j', 'ACCEPT'],
 
             # hijack all other dns requests
             [self.command, '-t', 'nat', '-A', self.chain_name, '-p', 'udp', '--dport', '53',
-             '-j', 'REDIRECT', '--to-ports', dnsmasq.port],
+             '-j', 'REDIRECT', '--to-ports', dnsmasq_port],
 
             [self.command, '-t', 'nat', '-A', 'PREROUTING', '-j', self.chain_name],  # lan
             [self.command, '-t', 'nat', '-A', 'OUTPUT', '-j', self.chain_name],  # router
@@ -256,7 +273,7 @@ class Iptable(object):
             [self.command, '-t', 'nat', '-X', self.chain_name],  # delete chain
         ]
 
-        for rule in dnsmasq.rules:
+        for rule in rules:
             self.start_commands.append([
                 'ipset', 'create', rule.name, 'hash:net'
             ])
@@ -276,17 +293,16 @@ class Iptable(object):
                 '-m', 'set', '--match-set', rule.name, 'dst',
                 '-j', 'REDIRECT', '--to-ports', rule.socks_local_port
             ])
-        return err
 
     def start(self):
         self.logger.debug('start iptables')
         for args in self.start_commands:
-            Utils.run_command(self.command, args)
+            Utils.run_command(args)
 
     def stop(self):
         self.logger.debug('stop iptables')
         for args in self.stop_commands:
-            Utils.run_command(self.command, args)
+            Utils.run_command(args)
 
     def _is_alive(self):
         args = [self.command, '-t', 'nat', '-nL', self.chain_name]
@@ -300,7 +316,7 @@ class Iptable(object):
                 total_rule_count += 1
 
         with tempfile.NamedTemporaryFile(delete=True) as fh:
-            code = Utils.run_command(self.command, args, stdout=fh)
+            code = Utils.run_command(args, stdout=fh)
             if code:
                 self.logger.warning("iptables command run faild, assume the command itself is ok")
                 return False
@@ -327,51 +343,37 @@ class Iptable(object):
 
 
 class V2ray(object):
-    def __init__(self):
+    def __init__(self, run_dir, conf, rules, international_dns, international_dns_local_port):
         self.logger = Logger(self.__class__.__name__).logger
+        dns = international_dns
+        dns_local_port = international_dns_local_port
 
-    def __repr__(self):
-        return {
-            'inbounds': self.config['inbounds'],
-            'routing': self.config['routing']
-        }.__repr__()
-
-    def init(self, conf, rules):
-        err = []
-        dns = conf['main']['dns']
-        dns_local_port = conf['main']['dns_local_port']
-        command = conf['v2ray']['v2ray']
+        self.config_file = "{}/v2ray_config.json".format(run_dir)
+        self.pid_file = "{}/v2ray.pid".format(run_dir)
+        self.log_file = "{}/v2ray.log".format(run_dir)
 
         try:
             local_bin_path = [Utils.find_file('./bin')]
         except Exception:
             local_bin_path = []
 
-        self.command = Utils.which(
-            command,
-            [*local_bin_path, '/opt/v2ray', '/usr/local/bin', '/usr/bin/v2ray'])
-        self.version = None
-        if not self.command:
-            err.append('Command {} not found.'.format(command))
-        else:
-            self.version = Utils.get_command_version([self.command, '--version'],
-                                                     r'V2Ray (\d)\.(\d+)\.(\d+)')
+        self.prog = Prog('v2ray', args=['--config', self.config_file],
+                         bin_path=[*local_bin_path, '/opt/v2ray', '/usr/local/bin', '/usr/bin/v2ray'],
+                         pid_file=self.pid_file)
+
+        self.version = Utils.get_command_version(['v2ray', '--version'],
+                                                 r'V2Ray (\d)\.(\d+)\.(\d+)')
 
         self.logger.debug('V2ray version {}'.format(self.version))
 
-        run_dir = Utils.find_file(conf['main']['run_dir'])
-
-        self.config_file = "{}/v2ray_config.json".format(run_dir)
-        self.pid_file = "{}/v2ray.pid".format(run_dir)
-        self.log_file = "{}/v2ray.log".format(run_dir)
-
-        outbounds = conf['v2ray']['outbounds']
-        inbounds = conf['v2ray']['inbounds']
+        outbounds = conf['outbounds']
+        inbounds = conf['inbounds']
         self.rules = rules
 
         outbounds = re.sub(r'//.*', '', outbounds, re.M)  # remove comments
         self.outbounds = json.loads(outbounds)
-        err.extend(self._check_v2ray_config())
+
+        self._check_v2ray_config()
 
         inbounds = re.sub(r'//.*', '', inbounds, re.M)  # remove comments
         if inbounds:
@@ -384,78 +386,37 @@ class V2ray(object):
             'routing': self._get_v2ray_routing(inbounds)
         }
 
-        return err
+    def __repr__(self):
+        return {
+            'inbounds': self.config['inbounds'],
+            'routing': self.config['routing']
+        }.__repr__()
 
     def _check_v2ray_config(self):
         tags = {}
-        err = []
         for outbound in self.outbounds:
             if outbound.get('tag'):
                 tags[outbound['tag']] = 1
             else:
-                err.append('Outbound must set a tag.')
+                raise GFWException('Outbound must set a tag: '.format(outbound))
 
         for rule in self.rules:
             if not tags.get(rule.name):
-                err.append('Outbound tag for "{}" not found'.format(rule.name))
-        return err
-
-    def _check_config(self):
-        check_args = [self.command, '--config', self.config_file, '--test']
-
-        self.logger.debug('check v2ray config file')
-        code = Utils.run_command('v2ray', check_args, stdout=open('/dev/null', 'w'))
-        if code:
-            raise GFWException("v2ray config file check error")
-
-    def _run(self):
-        run_args = [self.command, '--config', self.config_file]
-        self.logger.debug('run v2ray')
-
-        def check_func(p):
-            if Utils.check_log_output(self.log_file,
-                                      linecount=2,
-                                      timeout=5):
-                return p.pid
-            return None
-
-        pid = Utils.run_command('v2ray',
-                                run_args,
-                                background=True,
-                                stdout=open(self.log_file, 'w'),
-                                check_func=check_func)
-
-        if not Utils.is_pid_alive(pid):
-            raise GFWException('start v2ray faild')
-
-        self.logger.debug('done, pid {}'.format(pid))
-        with open(self.pid_file, 'w') as fh:
-            fh.write(str(pid))
+                raise GFWException('Outbound tag for "{}" not found'.format(rule.name))
 
     def start(self):
         self.logger.debug('start v2ray')
-        if Utils.is_pid_alive_from_file(self.pid_file):
-            raise GFWException("Previouse process is still running")
-
         with open(self.config_file, 'w') as fh:
             fh.write(json.dumps(self.config, indent=4))
 
-        self._check_config()
-        self._run()
+        self.prog.start()
 
     def stop(self):
         self.logger.debug('stop v2ray')
-
-        if Utils.stop_from_pid_file(self.pid_file):
-            self.logger.debug('done')
-        else:
-            self.logger.debug('stop faild')
+        self.prog.stop()
 
     def status(self):
-        if Utils.is_pid_alive_from_file(self.pid_file):
-            self.logger.info('v2ray is running')
-        else:
-            self.logger.info('v2ray is dead')
+        self.prog.status()
 
     def _get_v2ray_inbounds(self, dns_local_port, dns, ext_inbounds):
         dns, port = Utils.split_ip_port(dns, 53)
@@ -581,7 +542,7 @@ class V2ray(object):
         raise GFWException('faild to get remote version')
 
     def update_binary(self):
-        dstpath = os.path.dirname(self.command)
+        dstpath = os.path.dirname(self.prog.command)
         self.logger.debug('update v2ray binary in {}'.format(dstpath))
 
         remote_version = self._get_remote_version()
@@ -607,136 +568,70 @@ class V2ray(object):
         self.logger.info('done')
 
 
-class Dnsmasq(object):
-    class Rule(object):
-        def __init__(self, name, filename, url, domains, socks_local_port):
-            self.name = name
-            self.filename = filename
-            self.url = url
-            self.domains = domains
-            self.socks_local_port = socks_local_port
-
-        def __repr__(self):
-            return {
-                'name': self.name,
-                'url': self.url,
-                'domains': "Total {} domains".format(len(self.domains)),
-                'socks_local_port': self.socks_local_port
-            }.__repr__()
-
-    def __init__(self):
-        self.logger = Logger(self.__class__.__name__).logger
-        self.rules = []
+class Rule(object):
+    def __init__(self, name, filename, url, domains, socks_local_port):
+        self.name = name
+        self.filename = filename
+        self.url = url
+        self.domains = domains
+        self.socks_local_port = socks_local_port
 
     def __repr__(self):
         return {
-            'rules': self.rules,
+            'name': self.name,
+            'url': self.url,
+            'domains': "Total {} domains".format(len(self.domains)),
+            'socks_local_port': self.socks_local_port
         }.__repr__()
 
-    def init(self, conf):
-        err = self._init_rules(conf)
 
-        run_dir = Utils.find_file(conf['main']['run_dir'])
+class Dnsmasq(object):
+    def __init__(self, run_dir, conf, international_dns_local_port, port, domestic_dns, rules):
+        self.logger = Logger(self.__class__.__name__).logger
+
+        ext_config = conf['ext_config']
 
         # pid_file 地址必须是绝对路径
         self.config_file = '{}/dnsmasq.conf'.format(run_dir)
         self.pid_file = os.path.abspath('{}/dnsmasq.pid'.format(run_dir))
         self.log_file = '{}/dnsmasq.log'.format(run_dir)
 
-        command = conf['dnsmasq']['dnsmasq']
-        self.port = conf['dnsmasq']['port']
-        self.domestic_server = conf['dnsmasq']['domestic_server']
+        self.port = port
+        self.domestic_dns = domestic_dns
 
-        self.command = Utils.which(command)
-        if not self.command:
-            err.append('Command {} not found.'.format(command))
+        self._get_config(international_dns_local_port, ext_config, rules)
+        self.prog = Prog('dnsmasq',
+                         args=['-C', self.config_file, '--log-facility={}'.format(self.log_file),
+                               '--pid-file={}'.format(self.pid_file)],
+                         pid_file=self.pid_file)
 
-        self._get_config(conf)
-        return err
+    def __repr__(self):
+        return 'config: {} ...'.format(self.config[0:100])
 
-    def _get_config(self, conf):
-        dns_local_port = conf['main']['dns_local_port']
-        config = conf['dnsmasq']['config']
-
+    def _get_config(self, dns_local_port, ext_config, rules):
         config_rules = []
-        for rule in self.rules:
+        for rule in rules:
             for domain in rule.domains:
                 config_rules.append("server=/.{domain}/127.0.0.1#{dns_local_port}\nipset=/.{domain}/{set_name}"
                                     .format(dns_local_port=dns_local_port, set_name=rule.name, domain=domain))
 
         self.config = "port={}\nserver={}\n{}\n\n{}".format(
-            self.port, self.domestic_server,
-            config, "\n".join(config_rules)
+            self.port,
+            self.domestic_dns,
+            ext_config, ""
+            # "\n".join(config_rules)
         )
-
-    def _init_rules(self, conf):
-        err = []
-        lists_dir = Utils.find_file(conf['main']['lists_dir'])
-
-        def sort_func(name):
-            if name == 'list_gfwlist':
-                return 1
-            return -1
-
-        for section_name in sorted(conf.keys(), key=sort_func):
-            m = re.match(r'^list_(.*)', section_name)
-            if not m:
-                continue
-
-            list_name = m.group(1)
-            list_filename = "{}/{}".format(lists_dir, list_name)
-            list_url = conf[section_name].get('url', '')
-
-            rule = Dnsmasq.Rule(list_name, list_filename, list_url, [], conf[section_name].get('socks_local_port'))
-            if os.path.exists(list_filename):
-                rule.domains = Utils.read_file_to_list(list_filename)
-            else:
-                err = "List file {} for {} not found".format(list_filename, list_name)
-                self.logger.debug(err)
-                err.append(err)
-
-            self.rules.append(rule)
-        return err
 
     def start(self):
         self.logger.debug('start dnsmasq')
-        if Utils.is_pid_alive_from_file(self.pid_file):
-            raise GFWException("Previouse process is still running")
-
         with open(self.config_file, 'w') as fh:
             fh.write(self.config)
 
-        run_args = [self.command, '-C', self.config_file, '--log-facility=-', '--pid-file={}'.format(self.pid_file)]
-
-        def check_func(p):
-            if Utils.check_log_output(self.log_file,
-                                      regex=r'dnsmasq\[\d+\]: started',
-                                      timeout=5):
-                return p.pid
-            return None
-
-        self.logger.debug('run dnsmasq')
-        pid = Utils.run_command(self.command,
-                                run_args,
-                                background=True,
-                                stderr=open(self.log_file, 'w'),
-                                check_func=check_func)
-
-        pid = Utils.get_pid(self.pid_file)
-        if not Utils.is_pid_alive(pid):
-            raise GFWException("start dnsmasq faild.")
-
-        self.logger.debug('done, pid {}'.format(pid))
-        with open(self.pid_file, 'w') as fh:
-            fh.write(str(pid))
+        self.prog.start(ignore_pid_file=True)
 
     def stop(self):
         self.logger.debug('stop dnsmasq')
-
-        if Utils.stop_from_pid_file(self.pid_file):
-            self.logger.debug('done')
-        else:
-            self.logger.debug('stop faild')
+        self.prog.stop()
 
     def keep_alive(self):
         if not Utils.is_port_open(self.port):
@@ -760,9 +655,10 @@ class GFW(object):
         self.config = None
         self.config_err = []
 
-        self.dnsmasq = Dnsmasq()
-        self.v2ray = V2ray()
-        self.iptable = Iptable()
+        self.dnsmasq = None
+        self.v2ray = None
+        self.iptable = None
+        self.rules = []
 
         self.init(config)
 
@@ -795,29 +691,67 @@ class GFW(object):
         main_section['ip_blacklists_src'] = Utils.str_to_list(main_section['ip_blacklists_src'])
         main_section['ip_blacklists_dst'] = Utils.str_to_list(main_section['ip_blacklists_dst'])
         run_dir = Utils.find_file(main_section['run_dir'])
+        international_dns = conf['main']['international_dns']
+        international_dns_local_port = conf['main']['international_dns_local_port']
+        dnsmasq_port = conf['main']['dnsmasq_port']
+        domestic_dns = conf['main']['domestic_dns']
+
+        dnsmasq_conf = conf['dnsmasq']
+        v2ray_conf = conf['v2ray']
 
         if not os.path.exists(run_dir):
             os.mkdir(run_dir)
 
-        err1 = self.dnsmasq.init(conf)
-        if err1:
-            self.config_err.extend(err1)
+        self.load_domain_rules(conf)
+        self.dnsmasq = Dnsmasq(run_dir=run_dir,
+                               conf=dnsmasq_conf,
+                               international_dns_local_port=international_dns_local_port,
+                               port=dnsmasq_port,
+                               domestic_dns=domestic_dns,
+                               rules=self.rules)
 
-        err2 = self.v2ray.init(conf=conf, rules=self.dnsmasq.rules)
-        if err2:
-            self.config_err.extend(err2)
+        self.v2ray = V2ray(run_dir=run_dir,
+                           conf=v2ray_conf,
+                           rules=self.rules,
+                           international_dns=international_dns,
+                           international_dns_local_port=international_dns_local_port)
 
-        err3 = self.iptable.init(conf=conf, dnsmasq=self.dnsmasq)
-        if err3:
-            self.config_err.extend(err3)
+        self.iptable = Iptable(run_dir=run_dir,
+                               rules=self.rules,
+                               dnsmasq_port=dnsmasq_port,
+                               domestic_dns=domestic_dns,
+                               ip_blacklists_dst=main_section['ip_blacklists_dst'],
+                               ip_blacklists_src=main_section['ip_blacklists_src'])
 
         self.config = {'main': main_section, 'dnsmasq': self.dnsmasq, 'v2ray': self.v2ray}
         self.logger.debug(self.config)
 
-    def check(self):
-        if self.config_err:
-            raise GFWException("\n".join(self.config_err))
+    def load_domain_rules(self, conf):
+        lists_dir = Utils.find_file(conf['main']['lists_dir'])
 
+        def sort_func(name):
+            if name == 'list_gfwlist':
+                return 1
+            return -1
+
+        for section_name in sorted(conf.keys(), key=sort_func):
+            m = re.match(r'^list_(.*)', section_name)
+            if not m:
+                continue
+
+            list_name = m.group(1)
+            list_filename = "{}/{}".format(lists_dir, list_name)
+            list_url = conf[section_name].get('url', '')
+
+            rule = Rule(list_name, list_filename, list_url, [], conf[section_name].get('socks_local_port'))
+            if os.path.exists(list_filename):
+                rule.domains = Utils.read_file_to_list(list_filename)
+            else:
+                raise GFWException("List file {} for {} not found".format(list_filename, list_name))
+
+            self.rules.append(rule)
+
+    def check(self):
         self.logger.info('ok')
 
     def keep_alive(self):
@@ -868,7 +802,7 @@ class GFW(object):
         self.logger.info('total domain {}'.format(len(domains)))
 
     def update_list(self):
-        for rule in self.dnsmasq.rules:
+        for rule in self.rules:
             if rule.url:
                 self.logger.debug('retrive {} from {}'.format(rule.name, rule.url))
                 count = self._update_list_file_from_remote(rule.url, rule.filename)
@@ -948,28 +882,21 @@ def main():
         gfw = GFW()
         if opts.command == 'check':
             gfw.check()
-        if opts.command == 'update_list':
-            gfw.check()
+        elif opts.command == 'update_list':
             gfw.update_list()
         elif opts.command == 'start':
-            gfw.check()
             gfw.start()
         elif opts.command == 'stop':
-            gfw.check()
             gfw.stop()
         elif opts.command == 'restart':
             gfw.stop()
             time.sleep(1)
-            gfw.check()
             gfw.start()
         elif opts.command == 'status':
-            gfw.check()
             gfw.status()
         elif opts.command == 'keep_alive':
-            gfw.check()
             gfw.keep_alive()
         elif opts.command == 'update_v2ray':
-            gfw.check()
             gfw.update_v2ray()
         elif opts.command == 'install_v2ray':
             gfw.install_v2ray()
