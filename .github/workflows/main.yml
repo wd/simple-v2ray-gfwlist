@@ -6,12 +6,13 @@ jobs:
   build:
 
     runs-on: ubuntu-latest
-    
+
     steps:
     - uses: actions/checkout@v1
     - name: Prepare
       run: |
       pip install pipenv
       pipenv install --dev
+      cp tests/config.ini src
     - name: Run tests
       run: pipenv run pytest -v
