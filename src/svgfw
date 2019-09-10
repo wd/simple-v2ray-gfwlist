@@ -66,6 +66,17 @@ class Utils(object):
         return res
 
     @staticmethod
+    def parse_rules(rules):
+        if not rules:
+            return []
+
+        try:
+            rules = json.loads(rules)
+            return rules
+        except Exception:
+            return []
+
+    @staticmethod
     def split_ip_port(ip, default_port):
         ip_pair = ip.split(':')
         if len(ip_pair) > 1:
@@ -192,6 +203,9 @@ class Prog(object):
         if not self.command:
             raise GFWException('Command {} not found.'.format(command))
 
+    def __repr__(self):
+        return str(self.args)
+
     def start(self, ignore_pid_file=False):
         self._ensure_prog_is_not_running()
         process = Utils.run_command([self.command, *self.args], background=True)
@@ -217,9 +231,9 @@ class Prog(object):
 
     def stop(self):
         if Utils.stop_from_pid_file(self.pid_file):
-            self.logger.debug('done')
+            self.logger.debug('{} done'.format(self.name))
         else:
-            self.logger.debug('stop faild')
+            self.logger.debug('stop {} faild'.format(self.name))
 
     def status(self):
         if Utils.is_pid_alive_from_file(self.pid_file):
@@ -229,7 +243,8 @@ class Prog(object):
 
 
 class Iptable(object):
-    def __init__(self, run_dir, rules, dnsmasq_port, domestic_dns, ip_blacklists_src, ip_blacklists_dst):
+    def __init__(self, run_dir, rules, dnsmasq_port, domestic_dns,
+                 ip_blacklists_src, ip_blacklists_dst, iptables_rules):
         self.logger = Logger(self.__class__.__name__).logger
 
         command = 'iptables'
@@ -238,10 +253,7 @@ class Iptable(object):
             raise GFWException('Command {} not found.'.format(command))
 
         self.chain_name = 'SVGFW'
-        self.start_commands = [
-            [self.command, '-t', 'nat', '-N', self.chain_name],
-            [self.command, '-t', 'nat', '-N', self.chain_name],
-        ]
+        self.start_commands = [[self.command, '-t', 'nat', '-N', self.chain_name]]
 
         for ip in ip_blacklists_src:
             self.start_commands.append([
@@ -251,6 +263,11 @@ class Iptable(object):
         for ip in ip_blacklists_dst:
             self.start_commands.append([
                 self.command, '-t', 'nat', '-A', self.chain_name, '-d', ip, '-j', 'ACCEPT'
+            ])
+
+        for rule in iptables_rules:
+            self.start_commands.append([
+                self.command, '-t', 'nat', '-A', self.chain_name, *rule
             ])
 
         self.start_commands.extend([
@@ -342,7 +359,95 @@ class Iptable(object):
             self.logger.info('alive')
 
 
-class V2ray(object):
+class Proxy(object):
+    def start(self):
+        raise NotImplementedError
+
+    def stop(self):
+        raise NotImplementedError
+
+    def status(self):
+        raise NotImplementedError
+
+    def keep_alive(self):
+        if not Utils.is_port_open(self.ports):
+            self.logger.info('dead, do restart')
+            self.stop()
+            self.start()
+        else:
+            self.logger.info('alive')
+
+
+class SS(Proxy):
+    def __init__(self, run_dir, conf, rules, international_dns, international_dns_local_port):
+        self.logger = Logger(self.__class__.__name__).logger
+
+        self.progs = []
+        self.pid_files = []
+        self.config_files = []
+
+        for rule in rules:
+            command = 'ss-redir'
+            pid_file = "{}/ss-redir-{}.pid".format(run_dir, rule.socks_local_port)
+            config_file = "{}/ss_config-{}.json".format(run_dir, rule.socks_local_port)
+            config = json.loads(conf['{}_config'.format(rule.name)])
+            self.progs.append({
+                'prog': Prog(
+                    command,
+                    ['-c', config_file, '-l', rule.socks_local_port],
+                    pid_file=pid_file
+                ),
+                'pid_file': pid_file,
+                'config_file': config_file,
+                'config': config})
+
+        command = 'ss-tunnel'
+        pid_file = "{}/ss-tunnel-{}.pid".format(run_dir, rule.socks_local_port)
+        config_file = self.progs[-1]['config_file']
+        config = self.progs[-1]['config']
+        self.progs.append({
+            'prog': Prog(
+                command,
+                ['-c', config_file, '-l', international_dns_local_port,
+                 '-L', '{}:53'.format(international_dns), '-u'],
+                pid_file=pid_file
+            ),
+            'pid_file': pid_file,
+            'config_file': config_file,
+            'config': config
+        })
+
+    def __repr__(self):
+        progs = copy.deepcopy(self.progs)
+        for prog in progs:
+            prog['config']['server'] = 'xxxxx'
+            prog['config']['password'] = 'xxxxx'
+        return str(progs)
+
+    def start(self):
+        self.logger.debug('start ss')
+        for prog in self.progs:
+            config_file = prog['config_file']
+            config = prog['config']
+            cmd = prog['prog']
+            with open(config_file, 'w') as fh:
+                fh.write(json.dumps(config, indent=4))
+            cmd.start()
+
+    def stop(self):
+        self.logger.debug('stop ss')
+        for prog in self.progs:
+            cmd = prog['prog']
+            cmd.stop()
+
+    def status(self):
+        self.logger.debug('stop ss')
+        for prog in self.progs:
+            cmd = prog['prog']
+            cmd.status()
+
+
+class V2ray(Proxy):
     def __init__(self, run_dir, conf, rules, international_dns, international_dns_local_port):
         self.logger = Logger(self.__class__.__name__).logger
         dns = international_dns
@@ -487,7 +592,8 @@ class V2ray(object):
 
         return {'rules': routings}
 
-    def _install_binary(self, version, dstpath):
+    @staticmethod
+    def _install_binary(version, dstpath):
         files_to_update = ['v2ctl', 'v2ray', 'v2ctl.sig', 'v2ray.sig', 'geoip.dat', 'geosite.dat']
 
         for f in files_to_update:
@@ -504,7 +610,7 @@ class V2ray(object):
             if uname.machine == 'aarch64':
                 arch = 'linux-arm64'
         if not arch:
-            self.logger.info('this system not support update: {}'.format(uname))
+            Utils.logger.info('this system not support update: {}'.format(uname))
             return
 
         link = V2RAY_DOWNLOAD_LINK.format(version='.'.join([str(v) for v in version]), arch=arch)
@@ -513,48 +619,37 @@ class V2ray(object):
             raise GFWException('download zip file faild.')
 
         tmpfile = tempfile.NamedTemporaryFile(delete=True)
-        self.logger.debug('tempfile is {}'.format(tmpfile.name))
+        Utils.logger.debug('tempfile is {}'.format(tmpfile.name))
         tmpfile.write(resp.read())
         with zipfile.ZipFile(tmpfile) as zip:
             with tempfile.TemporaryDirectory() as tmppath:
-                self.logger.debug('extract files {} to {}'.format(files_to_update, tmppath))
+                Utils.logger.debug('extract files {} to {}'.format(files_to_update, tmppath))
                 zip.extractall(members=files_to_update, path=tmppath)
                 for fname in files_to_update:
                     fsrc = '{}/{}'.format(tmppath, fname)
                     fdst = '{}/{}'.format(dstpath, fname)
-                    self.logger.debug('cp {}'.format(fdst))
+                    Utils.logger.debug('cp {}'.format(fdst))
                     os.system('cp -p {} {}'.format(fsrc, fdst))
                     if fname in ['v2ray', 'v2ctl']:
                         os.chmod(fdst, 755)
                     else:
                         os.chmod(fdst, 644)
 
-    def _get_remote_version(self):
+    @staticmethod
+    def _get_remote_version():
         resp = request.urlopen(LATEST_V2RAY_TAG_URL)
         if resp.status == 200:
             tag_info = json.load(resp)
             m = re.search(r'(\d)\.(\d+)\.(\d+)', tag_info.get('name', ''))
             if m:
                 remote_version = [int(v) for v in m.groups()]
-                self.logger.debug('remote version is {}'.format(remote_version))
+                Utils.logger.debug('remote version is {}'.format(remote_version))
                 return remote_version
 
         raise GFWException('faild to get remote version')
 
-    def update_binary(self):
-        dstpath = os.path.dirname(self.prog.command)
-        self.logger.debug('update v2ray binary in {}'.format(dstpath))
-
-        remote_version = self._get_remote_version()
-        self.logger.info('Local version: {}, remote version: {}'.format(self.version, remote_version))
-        if (self.version < remote_version):
-            self.logger.info('do update')
-            self._install_binary(remote_version, dstpath)
-            self.logger.info('update finished')
-        else:
-            self.logger.info('do not need to update')
-
-    def install_binary(self):
+    @staticmethod
+    def install_binary():
         try:
             local_bin_path = Utils.find_file('./bin')
         except Exception:
@@ -562,10 +657,10 @@ class V2ray(object):
             local_bin_path = '{}/{}'.format(my_path, './bin')
             os.mkdir(local_bin_path)
 
-        self.logger.info('install v2ray binary at {}'.format(local_bin_path))
-        remote_version = self._get_remote_version()
-        self._install_binary(remote_version, local_bin_path)
-        self.logger.info('done')
+        Utils.logger.info('install v2ray binary at {}'.format(local_bin_path))
+        remote_version = V2ray._get_remote_version()
+        V2ray._install_binary(remote_version, local_bin_path)
+        Utils.logger.info('done')
 
 
 class Rule(object):
@@ -618,8 +713,8 @@ class Dnsmasq(object):
         self.config = "port={}\nserver={}\n{}\n\n{}".format(
             self.port,
             self.domestic_dns,
-            ext_config, ""
-            # "\n".join(config_rules)
+            ext_config,
+            "\n".join(config_rules)
         )
 
     def start(self):
@@ -656,7 +751,7 @@ class GFW(object):
         self.config_err = []
 
         self.dnsmasq = None
-        self.v2ray = None
+        self.proxy = None
         self.iptable = None
         self.rules = []
 
@@ -690,6 +785,8 @@ class GFW(object):
         main_section = conf['main']
         main_section['ip_blacklists_src'] = Utils.str_to_list(main_section['ip_blacklists_src'])
         main_section['ip_blacklists_dst'] = Utils.str_to_list(main_section['ip_blacklists_dst'])
+        main_section['iptables_rules'] = Utils.parse_rules(main_section['iptables_rules'])
+
         run_dir = Utils.find_file(main_section['run_dir'])
         international_dns = conf['main']['international_dns']
         international_dns_local_port = conf['main']['international_dns_local_port']
@@ -697,7 +794,6 @@ class GFW(object):
         domestic_dns = conf['main']['domestic_dns']
 
         dnsmasq_conf = conf['dnsmasq']
-        v2ray_conf = conf['v2ray']
 
         if not os.path.exists(run_dir):
             os.mkdir(run_dir)
@@ -710,20 +806,40 @@ class GFW(object):
                                domestic_dns=domestic_dns,
                                rules=self.rules)
 
-        self.v2ray = V2ray(run_dir=run_dir,
-                           conf=v2ray_conf,
-                           rules=self.rules,
-                           international_dns=international_dns,
-                           international_dns_local_port=international_dns_local_port)
-
         self.iptable = Iptable(run_dir=run_dir,
                                rules=self.rules,
                                dnsmasq_port=dnsmasq_port,
                                domestic_dns=domestic_dns,
                                ip_blacklists_dst=main_section['ip_blacklists_dst'],
-                               ip_blacklists_src=main_section['ip_blacklists_src'])
+                               ip_blacklists_src=main_section['ip_blacklists_src'],
+                               iptables_rules=main_section['iptables_rules'])
 
-        self.config = {'main': main_section, 'dnsmasq': self.dnsmasq, 'v2ray': self.v2ray}
+        ports = [international_dns_local_port]
+        for rule in self.rules:
+            ports.append(rule.socks_local_port)
+
+        if 'v2ray' in conf:
+            v2ray_conf = conf['v2ray']
+            self.proxy = V2ray(run_dir=run_dir,
+                               conf=v2ray_conf,
+                               rules=self.rules,
+                               international_dns=international_dns,
+                               international_dns_local_port=international_dns_local_port)
+        elif 'ss' in conf:
+            ss_conf = conf['ss']
+            self.proxy = SS(run_dir=run_dir,
+                            conf=ss_conf,
+                            rules=self.rules,
+                            international_dns=international_dns,
+                            international_dns_local_port=international_dns_local_port)
+        elif 'generic' in conf:
+            # self.proxy = Generic()
+            pass
+        else:
+            raise GFWException('No proxy configured')
+
+        self.proxy.ports = ports
+        self.config = {'main': main_section, 'dnsmasq': self.dnsmasq, 'proxy': self.proxy}
         self.logger.debug(self.config)
 
     def load_domain_rules(self, conf):
@@ -756,7 +872,7 @@ class GFW(object):
 
     def keep_alive(self):
         self.dnsmasq.keep_alive()
-        self.v2ray.keep_alive()
+        self.proxy.keep_alive()
         self.iptable.keep_alive()
 
     def _process_gfw_list(self, content):
@@ -811,14 +927,11 @@ class GFW(object):
                 url = self.config['main']['gfwlist']
                 self._update_gfw_list(url, rule.filename)
 
-    def update_v2ray(self):
-        self.v2ray.update_binary()
-
     def install_v2ray(self):
-        self.v2ray.install_binary()
+        V2ray.install_binary()
 
     def status(self):
-        self.v2ray.status()
+        self.proxy.status()
         self.dnsmasq.status()
         self.iptable.status()
 
@@ -829,13 +942,13 @@ class GFW(object):
 
     def start(self):
         self.confirm_network_available()
-        self.v2ray.start()
+        self.proxy.start()
         self.dnsmasq.start()
         self.iptable.start()
         self.status()
 
     def stop(self):
-        self.v2ray.stop()
+        self.proxy.stop()
         self.dnsmasq.stop()
         self.iptable.stop()
 
@@ -848,7 +961,6 @@ def main():
         'status': 'Show running status',
         'update_list': 'Update lists to the latested version',
         'keep_alive': 'Keep v2ray and dnsmasq are alive',
-        'update_v2ray': 'Update v2ray binary',
         'install_v2ray': 'Install v2ray binary',
         'check': 'Check if the envirments are ok'
     }
@@ -896,8 +1008,6 @@ def main():
             gfw.status()
         elif opts.command == 'keep_alive':
             gfw.keep_alive()
-        elif opts.command == 'update_v2ray':
-            gfw.update_v2ray()
         elif opts.command == 'install_v2ray':
             gfw.install_v2ray()
 
