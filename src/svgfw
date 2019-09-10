@@ -244,7 +244,7 @@ class Prog(object):
 
 class Iptable(object):
     def __init__(self, run_dir, rules, dnsmasq_port, domestic_dns,
-                 ip_blacklists_src, ip_blacklists_dst, iptables_rules):
+                 ip_blacklists_src, ip_blacklists_dst, iptables_rules, rely_ip):
         self.logger = Logger(self.__class__.__name__).logger
 
         command = 'iptables'
@@ -298,18 +298,32 @@ class Iptable(object):
                 ['ipset', 'destroy', rule.name]
             )
 
-            self.start_commands.append([
-                self.command, '-t', 'nat', '-A', self.chain_name,
-                '-p', 'tcp',
-                '-m', 'set', '--match-set', rule.name, 'dst',
-                '-j', 'REDIRECT', '--to-ports', rule.socks_local_port
-            ])
-            self.start_commands.append([
-                self.command, '-t', 'nat', '-A', self.chain_name,
-                '-p', 'udp',
-                '-m', 'set', '--match-set', rule.name, 'dst',
-                '-j', 'REDIRECT', '--to-ports', rule.socks_local_port
-            ])
+            if rely_ip:
+                self.start_commands.append([
+                    self.command, '-t', 'nat', '-A', self.chain_name,
+                    '-p', 'tcp',
+                    '-m', 'set', '--match-set', rule.name, 'dst',
+                    '-j', 'DNAT', '--to-destination', '{}:{}'.format(rely_ip, rule.socks_local_port)
+                ])
+                self.start_commands.append([
+                    self.command, '-t', 'nat', '-A', self.chain_name,
+                    '-p', 'udp',
+                    '-m', 'set', '--match-set', rule.name, 'dst',
+                    '-j', 'DNAT', '--to-destination', '{}:{}'.format(rely_ip, rule.socks_local_port)
+                ])
+            else:
+                self.start_commands.append([
+                    self.command, '-t', 'nat', '-A', self.chain_name,
+                    '-p', 'tcp',
+                    '-m', 'set', '--match-set', rule.name, 'dst',
+                    '-j', 'REDIRECT', '--to-ports', rule.socks_local_port
+                ])
+                self.start_commands.append([
+                    self.command, '-t', 'nat', '-A', self.chain_name,
+                    '-p', 'udp',
+                    '-m', 'set', '--match-set', rule.name, 'dst',
+                    '-j', 'REDIRECT', '--to-ports', rule.socks_local_port
+                ])
 
     def start(self):
         self.logger.debug('start iptables')
@@ -441,10 +455,29 @@ class SS(Proxy):
             cmd.stop()
 
     def status(self):
-        self.logger.debug('stop ss')
         for prog in self.progs:
             cmd = prog['prog']
             cmd.status()
+
+
+class Rely(Proxy):
+    def __init__(self):
+        self.logger = Logger(self.__class__.__name__).logger
+
+    def start(self):
+        self.logger.debug('start rely, we can do nothing')
+
+    def stop(self):
+        self.logger.debug('stop rely, we can do nothing')
+
+    def status(self):
+        if not Utils.is_port_open(self.ports):
+            self.logger.info('rely is dead')
+        else:
+            self.logger.info('alive')
+
+    def keep_alive(self):
+        self.logger.debug('we can do nothing, hope rely is running')
 
 
 class V2ray(Proxy):
@@ -681,7 +714,7 @@ class Rule(object):
 
 
 class Dnsmasq(object):
-    def __init__(self, run_dir, conf, international_dns_local_port, port, domestic_dns, rules):
+    def __init__(self, run_dir, conf, international_dns_local_port, port, domestic_dns, rules, rely_ip):
         self.logger = Logger(self.__class__.__name__).logger
 
         ext_config = conf['ext_config']
@@ -694,7 +727,11 @@ class Dnsmasq(object):
         self.port = port
         self.domestic_dns = domestic_dns
 
-        self._get_config(international_dns_local_port, ext_config, rules)
+        dns_ip = '127.0.0.1'
+        if rely_ip:
+            dns_ip = rely_ip
+
+        self._get_config(international_dns_local_port, ext_config, rules, dns_ip)
         self.prog = Prog('dnsmasq',
                          args=['-C', self.config_file, '--log-facility={}'.format(self.log_file),
                                '--pid-file={}'.format(self.pid_file)],
@@ -703,12 +740,13 @@ class Dnsmasq(object):
     def __repr__(self):
         return 'config: {} ...'.format(self.config[0:100])
 
-    def _get_config(self, dns_local_port, ext_config, rules):
+    def _get_config(self, dns_local_port, ext_config, rules, dns_ip):
         config_rules = []
         for rule in rules:
             for domain in rule.domains:
-                config_rules.append("server=/.{domain}/127.0.0.1#{dns_local_port}\nipset=/.{domain}/{set_name}"
-                                    .format(dns_local_port=dns_local_port, set_name=rule.name, domain=domain))
+                config_rules.append("server=/.{domain}/{dns_ip}#{dns_local_port}\nipset=/.{domain}/{set_name}"
+                                    .format(dns_local_port=dns_local_port,
+                                            set_name=rule.name, domain=domain, dns_ip=dns_ip))
 
         self.config = "port={}\nserver={}\n{}\n\n{}".format(
             self.port,
@@ -798,26 +836,10 @@ class GFW(object):
         if not os.path.exists(run_dir):
             os.mkdir(run_dir)
 
-        self.load_domain_rules(conf)
-        self.dnsmasq = Dnsmasq(run_dir=run_dir,
-                               conf=dnsmasq_conf,
-                               international_dns_local_port=international_dns_local_port,
-                               port=dnsmasq_port,
-                               domestic_dns=domestic_dns,
-                               rules=self.rules)
+        ports = self.load_domain_rules(conf)
+        ports.append(international_dns_local_port)
 
-        self.iptable = Iptable(run_dir=run_dir,
-                               rules=self.rules,
-                               dnsmasq_port=dnsmasq_port,
-                               domestic_dns=domestic_dns,
-                               ip_blacklists_dst=main_section['ip_blacklists_dst'],
-                               ip_blacklists_src=main_section['ip_blacklists_src'],
-                               iptables_rules=main_section['iptables_rules'])
-
-        ports = [international_dns_local_port]
-        for rule in self.rules:
-            ports.append(rule.socks_local_port)
-
+        rely_ip = None
         if 'v2ray' in conf:
             v2ray_conf = conf['v2ray']
             self.proxy = V2ray(run_dir=run_dir,
@@ -832,18 +854,37 @@ class GFW(object):
                             rules=self.rules,
                             international_dns=international_dns,
                             international_dns_local_port=international_dns_local_port)
-        elif 'generic' in conf:
-            # self.proxy = Generic()
-            pass
+        elif 'rely' in conf:
+            rely_ip = conf['rely']['ip']
+            self.proxy = Rely()
         else:
             raise GFWException('No proxy configured')
 
         self.proxy.ports = ports
+
+        self.dnsmasq = Dnsmasq(run_dir=run_dir,
+                               conf=dnsmasq_conf,
+                               international_dns_local_port=international_dns_local_port,
+                               port=dnsmasq_port,
+                               domestic_dns=domestic_dns,
+                               rules=self.rules,
+                               rely_ip=rely_ip)
+
+        self.iptable = Iptable(run_dir=run_dir,
+                               rules=self.rules,
+                               dnsmasq_port=dnsmasq_port,
+                               domestic_dns=domestic_dns,
+                               ip_blacklists_dst=main_section['ip_blacklists_dst'],
+                               ip_blacklists_src=main_section['ip_blacklists_src'],
+                               iptables_rules=main_section['iptables_rules'],
+                               rely_ip=rely_ip)
+
         self.config = {'main': main_section, 'dnsmasq': self.dnsmasq, 'proxy': self.proxy}
         self.logger.debug(self.config)
 
     def load_domain_rules(self, conf):
         lists_dir = Utils.find_file(conf['main']['lists_dir'])
+        ports = []
 
         def sort_func(name):
             if name == 'list_gfwlist':
@@ -866,6 +907,8 @@ class GFW(object):
                 raise GFWException("List file {} for {} not found".format(list_filename, list_name))
 
             self.rules.append(rule)
+            ports.append(rule.socks_local_port)
+        return ports
 
     def check(self):
         self.logger.info('ok')
@@ -940,49 +983,64 @@ class GFW(object):
         if resp.status != 200:
             raise GFWException('Network not available')
 
-    def start(self):
+    def start(self, service):
         self.confirm_network_available()
-        self.proxy.start()
-        self.dnsmasq.start()
-        self.iptable.start()
+        if service == 'v2ray' or not service:
+            self.proxy.start()
+
+        if service == 'dnsmasq' or not service:
+            self.dnsmasq.start()
+
+        if service == 'iptables' or not service:
+            self.iptable.start()
         self.status()
 
-    def stop(self):
-        self.proxy.stop()
-        self.dnsmasq.stop()
-        self.iptable.stop()
+    def stop(self, service):
+        if service == 'v2ray' or not service:
+            self.proxy.stop()
+
+        if service == 'dnsmasq' or not service:
+            self.dnsmasq.stop()
+
+        if service == 'iptables' or not service:
+            self.iptable.stop()
 
 
 def main():
-    commands = {
-        'start': 'Start proxy',
-        'stop': 'Stop proxy and clean all rules',
-        'restart': 'Restart proxy',
-        'status': 'Show running status',
-        'update_list': 'Update lists to the latested version',
-        'keep_alive': 'Keep v2ray and dnsmasq are alive',
-        'install_v2ray': 'Install v2ray binary',
-        'check': 'Check if the envirments are ok'
-    }
-
-    parser = argparse.ArgumentParser(
+    main_parser = argparse.ArgumentParser(
         formatter_class=argparse.RawTextHelpFormatter,
-        description='Simple V2ray wrapper to get across the GFW, version {}'.format(__VERSION__),
-        usage="%(prog)s [--debug] {}".format('|'.join(commands.keys()))
+        description='Simple V2ray/ss wrapper to get across the GFW, version {}'.format(__VERSION__)
     )
 
-    parser.add_argument('command',
-                        help="{}".format("\n".join(
-                            ["{:15s}: {}".format(k, v) for k, v in commands.items()]
-                        )),
-                        nargs='?',
-                        choices=commands.keys())
+    main_parser.add_argument('--debug', '-d', help='Show debug messages', action="store_true", default=False)
 
-    parser.add_argument('--debug', '-d', help='Show debug messages', action="store_true", default=False)
-    parser.add_argument('--full-log', '-l', help='Add logging to v2ray, dnsmasq for debug',
-                        action="store_true", default=False)
+    command_subparser = main_parser.add_subparsers(title="Avaliable commands", dest='command')
 
-    opts = parser.parse_args()
+    start_parser = command_subparser.add_parser('start', help="Start services")
+    start_service_subparser = start_parser.add_subparsers(title="Avaliable services", dest='service')
+    start_service_subparser.add_parser('v2ray', help="v2ray/ss")
+    start_service_subparser.add_parser('dnsmasq')
+    start_service_subparser.add_parser('iptables')
+
+    stop_parser = command_subparser.add_parser('stop', help="Stop services")
+    stop_service_subparser = stop_parser.add_subparsers(title="Avaliable services", dest='service')
+    stop_service_subparser.add_parser('v2ray', help="v2ray/ss")
+    stop_service_subparser.add_parser('dnsmasq')
+    stop_service_subparser.add_parser('iptables')
+
+    restart_parser = command_subparser.add_parser('restart', help="Restart services")
+    service_subparser = restart_parser.add_subparsers(title="Avaliable services", dest='service')
+    service_subparser.add_parser('v2ray', help="v2ray/ss")
+    service_subparser.add_parser('dnsmasq')
+    service_subparser.add_parser('iptables')
+
+    command_subparser.add_parser('status', help="Show running status")
+    command_subparser.add_parser('update_list', help="Update lists to the latested version")
+    command_subparser.add_parser('keep_alive', help="Keep all the service alive")
+    command_subparser.add_parser('install_v2ray', help="Install v2ray binary")
+    command_subparser.add_parser('check', help="Check the config.ini")
+
+    opts = main_parser.parse_args()
     if opts.debug:
         global default_logging_level
         default_logging_level = logging.DEBUG
@@ -997,13 +1055,13 @@ def main():
         elif opts.command == 'update_list':
             gfw.update_list()
         elif opts.command == 'start':
-            gfw.start()
+            gfw.start(opts.service)
         elif opts.command == 'stop':
-            gfw.stop()
+            gfw.stop(opts.service)
         elif opts.command == 'restart':
-            gfw.stop()
+            gfw.stop(opts.service)
             time.sleep(1)
-            gfw.start()
+            gfw.start(opts.service)
         elif opts.command == 'status':
             gfw.status()
         elif opts.command == 'keep_alive':

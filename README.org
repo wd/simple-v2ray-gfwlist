@@ -1,9 +1,9 @@
-简单讲，这是一个用来方便使用 v2ray 代理上网的工具。支持下面的特性：
+简单讲，这是一个用来方便使用 v2ray/ss 代理上网的工具。支持下面的特性：
 1. 只依赖了 python3 内置的模块（openwrt 上面的即使内置模块也被拆分成了不同的包），使用 python 比 shell 脚本更方便的兼容不同的系统，更好的错误捕获。还可以支持测试用例。
 2. 尽量少的修改 iptables 规则。
 3. 通过域名名单来使用不同的代理，比如 gfwlist 可以使用美国代理，而 netflix 单独使用一个支持访问的香港代理。
 4. 可以自动更新域名列表。
-5. 会自动处理大部分的 v2ray 配置。
+5. 会自动处理大部分的 v2ray/ss 配置。
 6. 支持不走代理的黑名单 ip。
 7. 可以自动更新 v2ray 程序。
 8. 支持运行检查，方便在路由器上面跑，v2ray 在路由器上面因为内存问题有时候会奔溃。
@@ -11,12 +11,12 @@
 
 这个程序的主要功能是在路由器上面跑透明代理，这样局域网内所有终端都可以无缝翻墙，比如电视盒子，Google Home 这样的设备。
 
-工作原理是下面几个关键点，实际上主要是三块内容 iptables，v2ray，dnsmasq：
+工作原理是下面几个关键点，实际上主要是三块内容 iptables，v2ray/ss，dnsmasq：
 1. 通过 iptables 劫持所有本机的和路过的 dns 请求（除了设定的某些国内 dns），把他们发给自己启动的 =60053= 端口的 dnsmasq。
-2. 这个 dnsmasq 会配置为，符合要求的域名（比如 gfwlist 里面的）会发送给一个 v2ray 启动的 dns 端口 =2053= ，来解决 dns 污染问题。其他的域名会走上面提到的那个国内 dns 解析。
+2. 这个 dnsmasq 会配置为，符合要求的域名（比如 gfwlist 里面的）会发送给一个 v2ray/ss 启动的 dns 端口 =2053= ，来解决 dns 污染问题。其他的域名会走上面提到的那个国内 dns 解析。
 3. 这个 dnsmasq 同时会把这些符合条件的域名解析回来的 ip 地址添加到对应的 ipset 列表里面。
 4. 通过 iptables 会把所有发往这些 ipset 列表里面的 ip 的请求发给 v2ray 对应的转发端口。
-5. v2ray 会启动几个端口，一个是 2053 的 dns 端口，用来转发 dns 请求到 8.8.8.8 以获取无污染的 dns 结果。其他的都是用来转发真实请求的，不同的域名列表，也就是 =list_xxx= 那个配置，会有不同的端口，对应不同的出口，这样可以做到根据域名来分流到不同的代理服务器。
+5. v2ray/ss 会启动几个端口，一个是 2053 的 dns 端口，用来转发 dns 请求到 8.8.8.8 以获取无污染的 dns 结果。其他的都是用来转发真实请求的，不同的域名列表，也就是 =list_xxx= 那个配置，会有不同的端口，对应不同的出口，这样可以做到根据域名来分流到不同的代理服务器。
 
 * Install
 
@@ -26,33 +26,33 @@
 
 #+BEGIN_SRC 
 $ ./svgfw -h
-usage: svgfw [--debug] start|stop|restart|status|update_list|init|keep_alive|update_v2ray|install_v2ray|check
+usage: svgfw [-h] [--debug]
+             {start,stop,restart,status,update_list,keep_alive,install_v2ray,check}
+             ...
 
-Simple V2ray wrapper to get across the GFW
-
-positional arguments:
-  {start,stop,restart,status,update_list,init,keep_alive,update_v2ray,install_v2ray,check}
-                        start          : Start proxy
-                        stop           : Stop proxy and clean all rules
-                        restart        : Restart proxy
-                        status         : Show running status
-                        update_list    : Update lists to the latested version
-                        keep_alive     : Keep v2ray and dnsmasq are alive
-                        update_v2ray   : Update v2ray binary
-                        install_v2ray  : Install v2ray binary
-                        check          : Check if the envirments are ok
+Simple V2ray/ss wrapper to get across the GFW, version 0.3
 
 optional arguments:
   -h, --help            show this help message and exit
   --debug, -d           Show debug messages
-  --full-log, -l        Add logging to v2ray, dnsmasq for debug
+
+Avaliable commands:
+  {start,stop,restart,status,update_list,keep_alive,install_v2ray,check}
+    start               Start services
+    stop                Stop services
+    restart             Restart services
+    status              Show running status
+    update_list         Update lists to the latested version
+    keep_alive          Keep all the service alive
+    install_v2ray       Install v2ray binary
+    check               Check the config.ini
 #+END_SRC
 
-- =start=, =stop=, =restart=: 启动，停止，重启代理
+- =start=, =stop=, =restart=: 启动，停止，重启代理，可以使用 =start dnsmasq= 来单独控制 dnsmasq
 - =status=: 打印运行状态
 - =update_list=: 更新规则列表
 - =keep_alive=: 检查运行状态，如果有奔溃的程序，自动启动那个程序
-- =update_v2ray=, =install_v2ray=: 更新，安装 v2ray，安装会在程序所在的目录里面建一个 =./bin/= 目录
+- =install_v2ray=: 安装 v2ray，安装会在程序所在的目录里面建一个 =./bin/= 目录，可重复运行更新
 - =check=: 检查运行环境
 
 上面的命令配合使用 =-d= 参数会输出更多的信息，debug 的时候可以使用。
@@ -69,11 +69,13 @@ opkg/entware 配置好之后，执行下面的命令安装依赖:
 opkg install python3 python3-logging python3-urllib python3-openssl python3-codecs ca-bundle
 #+END_SRC
 
-如果是在路由器上面运行，可能还需要配置一下虚拟内存，因为 v2ray 是 go 写的，对内存要求比较高，需要你插入一个 u 盘，如果是 merlin 系统，上面配置 opkg/entware 的时候应该就已经插入了，那么就会有一个 =/opt= 目录。
+** v2ray
+
+在路由器上面运行 v2ray 可能还需要配置一下虚拟内存，因为 v2ray 是 go 写的，对内存要求比较高，需要你插入一个 u 盘，如果是 merlin 系统，上面配置 opkg/entware 的时候应该就已经插入了，那么就会有一个 =/opt= 目录。
 
 其他的可以参考[[https://gist.github.com/wd/e0bc83b33ce63506a9bdbc3b81658c52#gistcomment-2347495][这个链接]] FAQ 的 8。
 
-我的是 merlin 系统，使用的是 =entware-setup.sh= 完成的 entware 安装，修改之后我的 =/jffs/scripts/post-mount= 文件内容如下，会建立一个 500M 的虚拟内存:
+我的是 merlin 系统，使用的是 =entware-setup.sh= 完成的 entware 安装，修改之后我的 =/jffs/scripts/post-mount= 文件内容如下，这样每次启动都会建立一个 500M 的虚拟内存:
 #+BEGIN_SRC sh
 !/bin/sh
 
@@ -90,7 +92,7 @@ if [ -d "/opt" ];then
 fi
 #+END_SRC
 
-建议时常观察一下这块内存的使用情况，一般是不会用到的，如果真的被用到了，那你的系统会比较慢，或者你的翻墙速度会比较慢。
+建议时常观察一下这块内存的使用情况，一般是不会用到的，如果真的被用到了，那你的上网会比较慢，或者你的翻墙速度会比较慢。
 
 使用下面的命令可以观察，看那个 Swap 那行，第二个数字，应该是 0。
 #+begin_src sh
@@ -101,6 +103,26 @@ Mem:        440420     324796     115624       2552       6224     108704
 Swap:       511996          0     511996
 #+end_src
 
+** ss
+
+可以直接通过 opkg 安装和更新：
+#+begin_src
+opkg install shadowsocks-libev-ss-redir shadowsocks-libev-ss-tunnel simple-obfs
+#+end_src
+
+其中 ~ss-redir~ 提供透明代理， ~ss-tunnel~ 提供 dns 查询， ~simple-obfs~ 根据你自己的情况，没用到可以不装。
+
+有几个问题需要注意下：
+1. 使用 ~ss-tunnel~ 查询 dns 需要 ss 服务器那边同时开放 udp 端口，否则查不了。
+2. 使用 ~simple-obfs~ 的话，配置文件里面的 server 需要填 ip，填域名会启动不了，不知道什么情况。
+
+** rely
+这种模式是方便把代理服务跑其他机器的，这样可以解决路由器内存太小的问题。
+
+可以直接把配置好的程序复制到其他机器，然后使用 ~svgfw start v2ray~ 这样的命令来单独启动代理。
+
+note: 这个方式我还没有自己测试过。
+
 * Autostart
 对于梅林系统，想要每次路由器启动都自动运行，需要在 =/jffs/scripts/wan-start= 里面增加下面的信息， =/opt/svgfw/= 是程序所在目录。这样可以每分钟检查一下是不是在运行，如果不在运行了会自动启动。可以观察 =/tmp/svgfw.log= 文件看是不是有奔溃，如果奔溃比较多，最好还是升级路由器吧，要翻墙会很不稳定。
 
@@ -108,11 +130,10 @@ Swap:       511996          0     511996
 cru a svgfw_check "* * * * * /opt/svgfw/svgfw keep_alive >> /tmp/svgfw.log"
 #+END_SRC
 
-我没有其他系统了，欢迎补充。
+对于 linux 系统，或者 openwrt 也可以类似的添加一条定时任务即可。
 
 * Todo
 - 支持 ipv6
-- 线路检查切换等功能
 
 * Thanks
 - [[https://github.com/zfl9/ss-tproxy][ss-tproxy]]: 在自己写这个项目之前使用的是这个方案，我这个方案也参考了一些思路，这个方案支持更加广泛，比如 chnroute 之类的方式。
