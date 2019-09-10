@@ -9,6 +9,7 @@ svgfw = import_path('./src/svgfw')
 GFW = svgfw.GFW
 Dnsmasq = svgfw.Dnsmasq
 Iptable = svgfw.Iptable
+GFWException = svgfw.GFWException
 
 
 class GFWTest(unittest.TestCase):
@@ -45,7 +46,4 @@ class GFWTest(unittest.TestCase):
         cts = ConfigToString()
         conf.write(cts)
 
-        gfw = GFW("".join(cts.lines))
-        self.assertEqual(gfw.config_err,
-                         ['Outbound tag for "netflix" not found',
-                          'Outbound tag for "gfwlist" not found'])
+        self.assertRaisesRegex(GFWException, r'Outbound tag for .* not found', GFW, "".join(cts.lines))

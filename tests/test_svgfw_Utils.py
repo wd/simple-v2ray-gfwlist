@@ -59,19 +59,13 @@ class UtilsTest(unittest.TestCase):
         cmd = Utils.which('test_command', path_list=[fake_bin_path])
         tmpfile = tempfile.NamedTemporaryFile(delete=True)
         test_str = 'test'
-        code = Utils.run_command(cmd, [cmd, 'output', test_str], stdout=tmpfile)
+        code = Utils.run_command([cmd, 'output', test_str], stdout=tmpfile)
         self.assertEqual(code, 0, 'success exit code')
         tmpfile.seek(0)
         self.assertEqual(test_str, tmpfile.read().decode('utf8').rstrip(), 'output to a file')
 
-        code = Utils.run_command(cmd, [cmd, 'error_quit'])
+        code = Utils.run_command([cmd, 'error_quit'])
         self.assertGreater(code, 0, 'faild exit code')
-
-        def check_func(p):
-            return p.pid
-
-        pid = Utils.run_command(cmd, [cmd], background=True, check_func=check_func)
-        self.assertGreater(pid, 0, 'background run, and check function')
 
     def test_is_port_open(self):
         port = 23456
@@ -99,39 +93,3 @@ class UtilsTest(unittest.TestCase):
             fh.write(str(pid).encode('utf8'))
             fh.seek(0)
             self.assertEqual(Utils.get_pid(fh.name), pid)
-
-    def test_check_log_output_linecount(self):
-        _, temp_file = tempfile.mkstemp()
-        fh = open(temp_file, 'w+')
-
-        def write_log():
-            time.sleep(2)
-            fh.write('11111')
-            fh.seek(0)
-
-        t = threading.Thread(target=write_log)
-        t.start()
-        fh.seek(0)
-
-        self.assertTrue(Utils.check_log_output(fh.name, linecount=1))
-        t.join()
-        fh.close()
-        os.unlink(temp_file)
-
-    def test_check_log_output_regex(self):
-        _, temp_file = tempfile.mkstemp()
-        fh = open(temp_file, 'w+')
-
-        def write_log():
-            time.sleep(2)
-            fh.write('11111')
-            fh.seek(0)
-
-        t = threading.Thread(target=write_log)
-        t.start()
-        fh.seek(0)
-
-        self.assertTrue(Utils.check_log_output(fh.name, regex=r'11111'))
-        t.join()
-        fh.close()
-        os.unlink(temp_file)
