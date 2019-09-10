@@ -11,7 +11,7 @@ jobs:
     - name: Prepare
       run: |
         pip install pipenv
-        pipenv install --dev
+        python -m pipenv install --dev
         cp tests/config.ini src
     - name: Run tests
-      run: pipenv run pytest -v
+      run: python -m pipenv run pytest -v
