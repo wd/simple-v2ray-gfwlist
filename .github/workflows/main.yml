@@ -14,4 +14,6 @@ jobs:
         python -m pipenv install --dev
         cp tests/config.ini src
     - name: Run tests
-      run: python -m pipenv run pytest -v
+      run: |
+          cd /home/runner/work/simple-v2ray-gfwlist/simple-v2ray-gfwlist
+          python -m pipenv run pytest -v
