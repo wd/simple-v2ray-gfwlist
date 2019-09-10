@@ -9,7 +9,7 @@ jobs:
     steps:
     - uses: actions/checkout@v1
     - name: Prepare
-    - run: |
+      run: |
         pip install pipenv
         pipenv install --dev
         cp tests/config.ini src
