@@ -4,13 +4,12 @@ on: [push]
 
 jobs:
   build:
-
+    name: Run tests
     runs-on: ubuntu-latest
-
     steps:
     - uses: actions/checkout@v1
     - name: Prepare
-      run: |
+    - run: |
       pip install pipenv
       pipenv install --dev
       cp tests/config.ini src
